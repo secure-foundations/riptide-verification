@@ -331,14 +331,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires AreBothFireable(idx1, idx2)
         requires idx1 != idx2
         ensures FirePE(idx1).IsFireable(idx2)
-    {
-        // match (processingElements[idx1], processingElements[idx2]) {
-        //     case (AddOperator(_, _, _), AddOperator(_, _, _)) => {}
-        //     case (AddOperator(_, _, _), CarryOperator(_, _, _, _, _)) => {}
-        //     case (CarryOperator(_, _, _, _, _), AddOperator(_, _, _)) => {}
-        //     case (CarryOperator(_, _, _, _, _), CarryOperator(_, _, _, _, _)) => {}
-        // }
-    }
+    {}
 
     // This might need longer timeouts
     lemma FirePEConfluence(idx1: PEIndex, idx2: PEIndex)
@@ -346,5 +339,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires AreBothFireable(idx1, idx2)
         requires idx1 != idx2
         ensures FirePE(idx1).FirePE(idx2) == FirePE(idx2).FirePE(idx1)
-    {}
+    {
+        CommutableFiring(idx1, idx2);
+    }
 }

@@ -420,7 +420,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         reveal_FirePE();
     }
 
-    // This might need longer timeouts
     lemma FirePEConfluence(idx1: PEIndex, idx2: PEIndex)
         requires Wellformed()
         requires idx1 != idx2

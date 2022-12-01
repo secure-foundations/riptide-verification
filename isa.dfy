@@ -49,7 +49,12 @@ datatype ProcessingElement =
                     case CarryB1 => [d]
                     case CarryB2 => [b]
                 }
-            case SteerOperator(_, _, d, a, _) => [d, a]
+            case SteerOperator(_, state, d, a, _) =>
+                match state {
+                    case SteerI => [d]
+                    case SteerA => [a]
+                    case SteerB => [a]
+                }
             case SelectOperator(d, a, b, _) => [d, a, b]
             case OrderOperator(a, b, _) => [a, b]
             case MergeOperator(state, d, a, b, _) =>
@@ -185,7 +190,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
     }
 
     // Fires the specified PE and transition to a new state
-    function FirePE(idx: PEIndex): (result: DataflowProgramState)
+    function {:opaque} FirePE(idx: PEIndex): (result: DataflowProgramState)
         requires 0 <= idx < |processingElements|
         requires Wellformed()
         requires IsFireable(idx)
@@ -200,9 +205,18 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         ensures forall i :: 0 <= i < |result.processingElements| && i != idx
                             ==> result.processingElements[i] == processingElements[i]
 
-        ensures forall i :: 0 <= i < |result.channels| &&
-                            i !in processingElements[idx].WaitingInputs() &&
-                            i !in processingElements[idx].WaitingOutputs() ==> result.channels[i] == channels[i]
+        // Characterize how the channels change after firing
+        ensures forall i :: i in processingElements[idx].WaitingInputs() && i in processingElements[idx].WaitingOutputs() ==>
+                            |result.channels[i]| >= 1 && result.channels[i][..|result.channels[i]| - 1] == channels[i][1..]
+
+        ensures forall i :: i in processingElements[idx].WaitingInputs() && i !in processingElements[idx].WaitingOutputs() ==>
+                            result.channels[i] == channels[i][1..]
+
+        ensures forall i :: i !in processingElements[idx].WaitingInputs() && i in processingElements[idx].WaitingOutputs() ==>
+                            |result.channels[i]| >= 1 && result.channels[i][..|result.channels[i]| - 1] == channels[i]
+
+        ensures forall i :: i !in processingElements[idx].WaitingInputs() && i !in processingElements[idx].WaitingOutputs() && 0 <= i < |result.channels| ==>
+                            result.channels[i] == channels[i]
     {
         var pe := processingElements[idx];
         match pe
@@ -377,38 +391,14 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires 0 <= idx2 < |processingElements|
         requires IsFireable(idx1)
         requires IsFireable(idx2)
+        ensures FirePE(idx1).Wellformed()
         ensures FirePE(idx1).IsFireable(idx2)
-    {}
+    {
+        reveal_FirePE();
+    }
 
     // Output values do not depend on the channels other than WaitingInputs()
     lemma FirePEDependency(state1: DataflowProgramState, state2: DataflowProgramState, idx: PEIndex)
-        requires state1.Wellformed() && state2.Wellformed()
-        requires |state1.channels| == |state2.channels|
-        requires 0 <= idx < |state1.processingElements| == |state2.processingElements|
-        requires state1.processingElements[idx] == state2.processingElements[idx]
-        requires state1.IsFireable(idx) && state2.IsFireable(idx)
-
-        // Same input channels
-        requires forall i :: i in state1.processingElements[idx].WaitingInputs() ==>
-                             state1.channels[i] == state2.channels[i]
-
-        // Same output channels
-        requires forall i :: i in state1.processingElements[idx].Outputs() ==>
-                             state1.channels[i] == state2.channels[i]
-
-        // Would result in the same output input channels
-        ensures var result1 := state1.FirePE(idx);
-                var result2 := state2.FirePE(idx);
-                forall i :: i in state1.processingElements[idx].WaitingInputs() ||
-                            i in state1.processingElements[idx].Outputs() ==>
-                            result1.channels[i] == result2.channels[i]
-
-        // And the same final state for the fired PE
-        ensures state1.FirePE(idx).processingElements[idx] == state2.FirePE(idx).processingElements[idx]
-    {}
-
-    // Output values do not depend on the channels other than WaitingInputs()
-    lemma FirePEDependency2(state1: DataflowProgramState, state2: DataflowProgramState, idx: PEIndex)
         requires state1.Wellformed() && state2.Wellformed()
         requires |state1.channels| == |state2.channels|
         requires 0 <= idx < |state1.processingElements| == |state2.processingElements|
@@ -419,37 +409,16 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires forall i :: i in state1.processingElements[idx].WaitingInputs() ==>
                              state1.channels[i][0] == state2.channels[i][0]
 
-        // Same output channels
-        // requires forall i :: i in state1.processingElements[idx].Outputs() ==>
-        //                      state1.channels[i] == state2.channels[i]
-
-        // Would result in the same "output values"
+        // Would result in the same output values and final states
         ensures var pe := state1.processingElements[idx];
                 var result1 := state1.FirePE(idx);
                 var result2 := state2.FirePE(idx);
-                forall i :: i in pe.Outputs() ==>
-                    // If the output channel is not an input channel
-                    (i !in pe.WaitingInputs() ==>
-                        // Either unchanged
-                        (result1.channels[i] == state1.channels[i] && result2.channels[i] == state2.channels[i]) ||
-                        // Or appended with the same value
-                        (result1.channels[i][|result1.channels[i]| - 1] == result2.channels[i][|result2.channels[i]| - 1] &&
-                         result1.channels[i][..|result1.channels[i]| - 1] == state1.channels[i] &&
-                         result2.channels[i][..|result2.channels[i]| - 1] == state2.channels[i])
-                    ) ||
-                    // Otherwise the output channel is an input channel
-                    (i in pe.WaitingInputs() ==>
-                        // Either has one value popped
-                        (result1.channels[i] == state1.channels[i][1..] && result2.channels[i] == state2.channels[i][1..]) ||
-                        // Or has one value popped and appended with the a value identical in result1 and result2
-                        (result1.channels[i][|result1.channels[i]| - 1] == result2.channels[i][|result2.channels[i]| - 1] &&
-                         result1.channels[i][..|result1.channels[i]| - 1] == state1.channels[i][1..] &&
-                         result2.channels[i][..|result2.channels[i]| - 1] == state2.channels[i][1..])
-                    )
-
-        // And the same final state for the fired PE
-        ensures state1.FirePE(idx).processingElements[idx] == state2.FirePE(idx).processingElements[idx]
-    {}
+                forall i :: i in pe.WaitingOutputs() ==>
+                result1.channels[i][|result1.channels[i]| - 1] == result2.channels[i][|result2.channels[i]| - 1] &&
+                result1.processingElements[idx] == result2.processingElements[idx]
+    {
+        reveal_FirePE();
+    }
 
     // This might need longer timeouts
     lemma FirePEConfluence(idx1: PEIndex, idx2: PEIndex)
@@ -459,113 +428,49 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires 0 <= idx2 < |processingElements|
         requires IsFireable(idx1)
         requires IsFireable(idx2)
-        // ensures FirePE(idx1).FirePE(idx2) == FirePE(idx2).FirePE(idx1)
+
+        ensures FirePE(idx1).Wellformed()
+        ensures FirePE(idx2).Wellformed()
+        ensures FirePE(idx1).IsFireable(idx2)
+        ensures FirePE(idx2).IsFireable(idx1)
+        ensures FirePE(idx1).FirePE(idx2) == FirePE(idx2).FirePE(idx1)
     {
         CommutableFiring(idx1, idx2);
         CommutableFiring(idx2, idx1);
+        
+        var fired12 := FirePE(idx1).FirePE(idx2);
+        var fired21 := FirePE(idx2).FirePE(idx1);
 
-        var fired1 := FirePE(idx1);
-        var fired2 := FirePE(idx2);
-        var fired12 := fired1.FirePE(idx2);
-        var fired21 := fired2.FirePE(idx1);
+        assert fired12 == fired21 by {
+            var pe1 := processingElements[idx1];
+            var pe2 := processingElements[idx2];
 
-        var inputs1 := processingElements[idx1].WaitingInputs();
-        var inputs2 := processingElements[idx2].WaitingInputs();
-        var outputs1 := processingElements[idx1].Outputs();
-        var outputs2 := processingElements[idx2].Outputs();
+            var inputs1 := pe1.WaitingInputs();
+            var inputs2 := pe2.WaitingInputs();
+            var outputs1 := pe1.WaitingOutputs();
+            var outputs2 := pe2.WaitingOutputs();
 
-        // Inputs to be consumed in fired1 and fired2 are the same
-        assert forall i :: i in inputs1 ==> fired2.channels[i][0] == channels[i][0];
-        assert forall i :: i in inputs2 ==> fired1.channels[i][0] == channels[i][0];
+            forall i | 0 <= i < |fired12.channels|
+                ensures fired12.channels[i] == fired21.channels[i]
+            {
+                reveal_FirePE();
+                if i in inputs1 && i in outputs1 {}
+                else if i in inputs2 && i in outputs2 {}
+                else if i in inputs1 && i in outputs2 {}
+                else if i in inputs2 && i in outputs1 {}
+                else {}
+            }
 
-        // forall i | i in outputs1
-        //     ensures 
-        // {
+            assert fired12.channels == fired21.channels;
+            assert fired12.processingElements == fired21.processingElements by {
+                reveal_FirePE();
+            }
+        }
 
-        // }
-
-        // forall i | 0 <= i < |fired12.channels|
-        //     ensures fired12.channels[i] == fired21.channels[i]
-        // {
-        //     if i in inputs1 {
-        //         if i in outputs1 {
-        //             // assert fired12.channels[i] == fired21.channels[i] by {
-        //             //     assert i !in outputs2;
-        //             // }
-        //             assume fired12.channels[i] == fired21.channels[i]
-        //         } else if i in outputs2 {
-        //             assert fired12.channels[i] == fired21.channels[i] by {
-        //                 assert i !in outputs1;
-        //                 assert 
-        //             }
-        //         } else {
-        //             assert fired12.channels[i] == fired21.channels[i];
-        //         }
-        //     } else { assume fired12.channels[i] == fired21.channels[i]; }
-            
-        //     // else if i in inputs2 {
-        //     //     assume fired12.channels[i] == fired21.channels[i];
-        //     // } else if i in outputs1 {
-        //     //     assume fired12.channels[i] == fired21.channels[i];
-        //     // } else if i in outputs2 {
-        //     //     assume fired12.channels[i] == fired21.channels[i];
-        //     // } else {
-        //     //     assert fired12.channels[i] == fired21.channels[i];
-        //     // }
-        // }
-
-        // forall i | 0 <= i < |fired12.processingElements|
-        //     ensures fired12.processingElements[i] == fired21.processingElements[i]
-        // {
-        //     assume fired12.processingElements[i] == fired21.processingElements[i];
-        // }
-
-        // assert |fired12.channels| == |fired21.channels|;
-        // assert |fired12.processingElements| == |fired21.processingElements|;
-
-        // assert fired12.channels == fired21.channels;
-        // assert fired12.processingElements == fired21.processingElements;
-        // assume fired12.processingElements[idx1] == fired21.processingElements[idx1];
-        // assume fired12.processingElements[idx2] == fired21.processingElements[idx2];
-
-        // assert forall i :: i in inputs1 ==> i !in inputs2;
-        // assert forall i :: i in outputs1 ==> i !in outputs2;
-
-        // assert forall i :: 0 <= i < |channels| &&
-        //                    i !in inputs1 &&
-        //                    i !in inputs2 &&
-        //                    i !in outputs1 &&
-        //                    i !in outputs2 ==>
-        //        fired12.channels[i] == fired21.channels[i] == channels[i];
-
-        // assume forall i :: i in inputs1 ==> i !in outputs2;
-        // assume forall i :: i in inputs2 ==> i !in outputs1;
-
-        // assert forall i :: i in inputs1 ==> fired12.channels[i] == fired1.channels[i];
-        // assert forall i :: i in outputs1 ==> fired12.channels[i] == fired1.channels[i];
-        // assert forall i :: i in inputs2 ==> fired21.channels[i] == fired2.channels[i];
-        // assert forall i :: i in outputs2 ==> fired21.channels[i] == fired2.channels[i];
-
-        // assert forall i :: i in inputs1 ==> fired2.channels[i] == channels[i];
-        // assert forall i :: i in outputs1 ==> fired2.channels[i] == channels[i];
-
-        // FirePEDependency(fired2, this, idx1);
-        // FirePEDependency(fired1, this, idx2);
-
-        // assert forall i :: i in inputs1 ==> fired21.channels[i] == fired1.channels[i];
-        // assert forall i :: i in outputs1 ==> fired21.channels[i] == fired1.channels[i];
-
-        // assert forall i :: 0 <= i < |channels| && i in outputs2 ==>
-        //        fired21.channels[i] == fired2.channels[i];
-
-        // match (processingElements[idx1], processingElements[idx2]) {
-        //     case (AddOperator(_, _, _), AddOperator(_, _, _)) => {
-                
-        //     }
-        //     // case (AddOperator(_, _, _), CarryOperator(_, _, _, _, _)) => {}
-        //     // case (CarryOperator(_, _, _, _, _), AddOperator(_, _, _)) => {}
-        //     // case (CarryOperator(_, _, _, _, _), CarryOperator(_, _, _, _, _)) => {}
-        //     case _ => {}
-        // }
+        // assert FirePE(idx1).Wellformed();
+        // assert FirePE(idx2).Wellformed();
+        // assert FirePE(idx1).IsFireable(idx2);
+        // assert FirePE(idx2).IsFireable(idx1);
+        // assert FirePE(idx1).FirePE(idx2) == FirePE(idx2).FirePE(idx1);
     }
 }

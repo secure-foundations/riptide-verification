@@ -115,10 +115,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
                 (forall k :: k in processingElements[i].Inputs() ==> k !in processingElements[j].Inputs()) &&
                 (forall k :: k in processingElements[i].Outputs() ==> k !in processingElements[j].Outputs());
 
-        // var distinctPEs :=
-        //     forall i, j :: 0 <= i < j < |processingElements| ==>
-        //     processingElements[i] != processingElements[j];
-
         var distinctInputChannels :=
             forall pe :: pe in processingElements ==>
             forall i, j :: 0 <= i < j < |pe.Inputs()| ==>
@@ -156,7 +152,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires WellFormed()
         requires 0 <= channelIdx < |channels|
         requires |channels[channelIdx]| > 0
-
         ensures Receive(channelIdx).1.WellFormed()
     {
         reveal_WellFormed();
@@ -209,8 +204,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         ensures result.processingElements[idx].Inputs() == processingElements[idx].Inputs()
         ensures result.processingElements[idx].Outputs() == processingElements[idx].Outputs()
 
-        ensures forall i :: 0 <= i < |result.processingElements| && i != idx
-                            ==> result.processingElements[i] == processingElements[i]
+        ensures forall i :: 0 <= i < |result.processingElements| && i != idx ==> result.processingElements[i] == processingElements[i]
 
         ensures result.WellFormed()
     {
@@ -338,7 +332,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         ensures FirePE(idx).processingElements[idx].Outputs() == processingElements[idx].Outputs()
 
         ensures forall i :: 0 <= i < |FirePE(idx).processingElements| && i != idx
-                            ==> FirePE(idx).processingElements[i] == processingElements[i]
+                        ==> FirePE(idx).processingElements[i] == processingElements[i]
 
         requires WellFormed()
 

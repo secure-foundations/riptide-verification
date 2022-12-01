@@ -4,24 +4,23 @@ type PEIndex = int
 type Value = int
 
 datatype CarryState = CarryI | CarryB1 | CarryB2
+datatype SteerState = SteerI | SteerA | SteerB
 datatype MergeState = MergeI | MergeA | MergeB
 
 datatype ProcessingElement =
-    AddOperator       (                        a: ChannelIndex, b: ChannelIndex,                  outputs: seq<ChannelIndex>) |
-    CarryOperator     (carryState: CarryState, d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>) |
-    TrueSteerOperator (                        d: ChannelIndex, a: ChannelIndex,                  outputs: seq<ChannelIndex>) |
-    FalseSteerOperator(                        d: ChannelIndex, a: ChannelIndex,                  outputs: seq<ChannelIndex>) |
-    SelectOperator    (                        d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>) |
-    OrderOperator     (                        a: ChannelIndex, b: ChannelIndex,                  outputs: seq<ChannelIndex>) |
-    MergeOperator     (mergeState: MergeState, d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>)
+    AddOperator   (                                     a: ChannelIndex, b: ChannelIndex,                  outputs: seq<ChannelIndex>) |
+    CarryOperator (             carryState: CarryState, d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>) |
+    SteerOperator (steer: bool, steerState: SteerState, d: ChannelIndex, a: ChannelIndex,                  outputs: seq<ChannelIndex>) |
+    SelectOperator(                                     d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>) |
+    OrderOperator (                                     a: ChannelIndex, b: ChannelIndex,                  outputs: seq<ChannelIndex>) |
+    MergeOperator (             mergeState: MergeState, d: ChannelIndex, a: ChannelIndex, b: ChannelIndex, outputs: seq<ChannelIndex>)
 {
     // Get all input channel indices of a PE
     function method Inputs(): seq<ChannelIndex> {
         match this
             case AddOperator(a, b, _) => [a, b]
             case CarryOperator(_, d, a, b, _) => [d, a, b]
-            case TrueSteerOperator(d, a, _) => [d, a]
-            case FalseSteerOperator(d, a, _) => [d, a]
+            case SteerOperator(_, _, d, a, _) => [d, a]
             case SelectOperator(d, a, b, _) => [d, a, b]
             case OrderOperator(a, b, _) => [a, b]
             case MergeOperator(_, d, a, b, _) => [d, a, b]
@@ -32,8 +31,7 @@ datatype ProcessingElement =
         match this
             case AddOperator(_, _, outputs) => outputs
             case CarryOperator(_, _, _, _, outputs) => outputs
-            case TrueSteerOperator(_, _, outputs) => outputs
-            case FalseSteerOperator(_, _, outputs) => outputs
+            case SteerOperator(_, _, _, _, outputs) => outputs
             case SelectOperator(_, _, _, outputs) => outputs
             case OrderOperator(_, _, output) => outputs
             case MergeOperator(_, _, _, _, outputs) => outputs
@@ -51,8 +49,7 @@ datatype ProcessingElement =
                     case CarryB1 => [d]
                     case CarryB2 => [b]
                 }
-            case TrueSteerOperator(d, a, _) => [d, a]
-            case FalseSteerOperator(d, a, _) => [d, a]
+            case SteerOperator(_, _, d, a, _) => [d, a]
             case SelectOperator(d, a, b, _) => [d, a, b]
             case OrderOperator(a, b, _) => [a, b]
             case MergeOperator(state, d, a, b, _) =>
@@ -60,6 +57,34 @@ datatype ProcessingElement =
                     case MergeI => [d]
                     case MergeA => [a]
                     case MergeB => [b]
+                }
+        }
+    }
+
+    function method WaitingOutputs(): seq<ChannelIndex>
+        ensures forall i :: i in WaitingOutputs() ==> i in Outputs()
+    {
+        match this {
+            case AddOperator(_, _, outputs) => outputs
+            case CarryOperator(state, _, _, _, outputs) =>
+                match state {
+                    case CarryI => outputs
+                    case CarryB1 => []
+                    case CarryB2 => outputs
+                }
+            case SteerOperator(_, state, _, _, outputs) =>
+                match state {
+                    case SteerI => []
+                    case SteerA => outputs
+                    case SteerB => []
+                }
+            case SelectOperator(_, _, _, outputs) => outputs
+            case OrderOperator(_, _, outputs) => outputs
+            case MergeOperator(state, _, _, _, outputs) =>
+                match state {
+                    case MergeI => []
+                    case MergeA => outputs
+                    case MergeB => outputs
                 }
         }
     }
@@ -177,7 +202,7 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
 
         ensures forall i :: 0 <= i < |result.channels| &&
                             i !in processingElements[idx].WaitingInputs() &&
-                            i !in processingElements[idx].Outputs() ==> result.channels[i] == channels[i]
+                            i !in processingElements[idx].WaitingOutputs() ==> result.channels[i] == channels[i]
     {
         var pe := processingElements[idx];
         match pe
@@ -194,34 +219,41 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
 
                 newState.Multicast(valA + valB, outputs)
 
-            case TrueSteerOperator(d, a, outputs) =>
-                assert d in pe.Inputs() && a in pe.Inputs();
-                assert outputs <= pe.Outputs();
+            case SteerOperator(steer, state, d, a, outputs) =>
+                match state {
+                    case SteerI =>
+                        assert d in pe.Inputs();
 
-                var valD := channels[d][0];
-                var valA := channels[a][0];
-                var newChannels := channels[d := channels[d][1..]][a := channels[a][1..]];
-                var newState := DataflowProgramState(newChannels, processingElements);
+                        var valD := channels[d][0];
+                        var newChannels := channels[d := channels[d][1..]];
+                        var updatedPE := if (valD == 0 && !steer) || (valD != 0 && steer)
+                                            then SteerOperator(steer, SteerA, d, a, outputs)
+                                            else SteerOperator(steer, SteerB, d, a, outputs);
+                        var newPEs := processingElements[idx := updatedPE];
+                        
+                        DataflowProgramState(newChannels, newPEs)
 
-                if valD == 1 then
-                    newState.Multicast(valA , outputs)
-                else
-                    newState
+                    case SteerA =>
+                        assert a in pe.Inputs();
+                        var valA := channels[a][0];
+                        var newChannels := channels[a := channels[a][1..]];
+                        var newPEs := processingElements[idx := SteerOperator(steer, SteerI, d, a, outputs)];
+                        var newState := DataflowProgramState(newChannels, newPEs);
+                        
+                        assert forall i :: 0 <= i < |newPEs| ==> newPEs[i].Inputs() == processingElements[i].Inputs();
+                        assert processingElements[idx].Outputs() == outputs;
 
-            case FalseSteerOperator(d, a, outputs) =>
-                assert d in pe.Inputs() && a in pe.Inputs();
-                assert outputs <= pe.Outputs();
+                        newState.Multicast(valA , outputs)
 
-                var valD := channels[d][0];
-                var valA := channels[a][0];
-                var newChannels := channels[d := channels[d][1..]][a := channels[a][1..]];
-                var newState := DataflowProgramState(newChannels, processingElements);
+                    case SteerB =>
+                        assert a in pe.Inputs();
+                        var newChannels := channels[a := channels[a][1..]];
+                        var newPEs := processingElements[idx := SteerOperator(steer, SteerI, d, a, outputs)];
+                        var newState := DataflowProgramState(newChannels, newPEs);
+                        newState
 
-                if valD == 0 then
-                    newState.Multicast(valA , outputs)
-                else
-                    newState
-            
+                }
+
             case SelectOperator(d, a, b, outputs) =>
                 assert d in pe.Inputs() && a in pe.Inputs() && b in pe.Inputs();
                 assert outputs <= pe.Outputs();
@@ -442,18 +474,72 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         var outputs1 := processingElements[idx1].Outputs();
         var outputs2 := processingElements[idx2].Outputs();
 
-        assert forall i :: i in inputs1 ==> i !in inputs2;
-        assert forall i :: i in outputs1 ==> i !in outputs2;
+        // Inputs to be consumed in fired1 and fired2 are the same
+        assert forall i :: i in inputs1 ==> fired2.channels[i][0] == channels[i][0];
+        assert forall i :: i in inputs2 ==> fired1.channels[i][0] == channels[i][0];
 
-        assert forall i :: 0 <= i < |channels| &&
-                           i !in inputs1 &&
-                           i !in inputs2 &&
-                           i !in outputs1 &&
-                           i !in outputs2 ==>
-               fired12.channels[i] == fired21.channels[i] == channels[i];
+        // forall i | i in outputs1
+        //     ensures 
+        // {
 
-        assume forall i :: i in inputs1 ==> i !in outputs2;
-        assume forall i :: i in inputs2 ==> i !in outputs1;
+        // }
+
+        // forall i | 0 <= i < |fired12.channels|
+        //     ensures fired12.channels[i] == fired21.channels[i]
+        // {
+        //     if i in inputs1 {
+        //         if i in outputs1 {
+        //             // assert fired12.channels[i] == fired21.channels[i] by {
+        //             //     assert i !in outputs2;
+        //             // }
+        //             assume fired12.channels[i] == fired21.channels[i]
+        //         } else if i in outputs2 {
+        //             assert fired12.channels[i] == fired21.channels[i] by {
+        //                 assert i !in outputs1;
+        //                 assert 
+        //             }
+        //         } else {
+        //             assert fired12.channels[i] == fired21.channels[i];
+        //         }
+        //     } else { assume fired12.channels[i] == fired21.channels[i]; }
+            
+        //     // else if i in inputs2 {
+        //     //     assume fired12.channels[i] == fired21.channels[i];
+        //     // } else if i in outputs1 {
+        //     //     assume fired12.channels[i] == fired21.channels[i];
+        //     // } else if i in outputs2 {
+        //     //     assume fired12.channels[i] == fired21.channels[i];
+        //     // } else {
+        //     //     assert fired12.channels[i] == fired21.channels[i];
+        //     // }
+        // }
+
+        // forall i | 0 <= i < |fired12.processingElements|
+        //     ensures fired12.processingElements[i] == fired21.processingElements[i]
+        // {
+        //     assume fired12.processingElements[i] == fired21.processingElements[i];
+        // }
+
+        // assert |fired12.channels| == |fired21.channels|;
+        // assert |fired12.processingElements| == |fired21.processingElements|;
+
+        // assert fired12.channels == fired21.channels;
+        // assert fired12.processingElements == fired21.processingElements;
+        // assume fired12.processingElements[idx1] == fired21.processingElements[idx1];
+        // assume fired12.processingElements[idx2] == fired21.processingElements[idx2];
+
+        // assert forall i :: i in inputs1 ==> i !in inputs2;
+        // assert forall i :: i in outputs1 ==> i !in outputs2;
+
+        // assert forall i :: 0 <= i < |channels| &&
+        //                    i !in inputs1 &&
+        //                    i !in inputs2 &&
+        //                    i !in outputs1 &&
+        //                    i !in outputs2 ==>
+        //        fired12.channels[i] == fired21.channels[i] == channels[i];
+
+        // assume forall i :: i in inputs1 ==> i !in outputs2;
+        // assume forall i :: i in inputs2 ==> i !in outputs1;
 
         // assert forall i :: i in inputs1 ==> fired12.channels[i] == fired1.channels[i];
         // assert forall i :: i in outputs1 ==> fired12.channels[i] == fired1.channels[i];
@@ -463,10 +549,10 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         // assert forall i :: i in inputs1 ==> fired2.channels[i] == channels[i];
         // assert forall i :: i in outputs1 ==> fired2.channels[i] == channels[i];
 
-        FirePEDependency2(fired2, this, idx1);
-        FirePEDependency2(fired1, this, idx2);
+        // FirePEDependency(fired2, this, idx1);
+        // FirePEDependency(fired1, this, idx2);
 
-        assert forall i :: i in inputs1 ==> fired21.channels[i] == fired1.channels[i];
+        // assert forall i :: i in inputs1 ==> fired21.channels[i] == fired1.channels[i];
         // assert forall i :: i in outputs1 ==> fired21.channels[i] == fired1.channels[i];
 
         // assert forall i :: 0 <= i < |channels| && i in outputs2 ==>

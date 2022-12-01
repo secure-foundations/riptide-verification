@@ -158,12 +158,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires |channels[channelIdx]| > 0
 
         ensures Receive(channelIdx).1.WellFormed()
-        // ensures var result := Receive(channelIdx).1;
-        //         result.WellFormed() &&
-        //         |result.channels| == |channels| &&
-        //         forall i :: 0 <= i < |channels| ==>
-        //             (i == channelIdx ==> result.channels[i] == channels[i][1..]) &&
-        //             (i != channelIdx ==> result.channels[i] == channels[i])
     {
         reveal_WellFormed();
         (channels[channelIdx][0], DataflowProgramState(channels[channelIdx := channels[channelIdx][1..]], processingElements))
@@ -173,10 +167,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
         requires WellFormed()
         requires 0 <= channelIdx < |channels|
         ensures result.WellFormed()
-        // ensures |result.channels| == |channels| &&
-        //         forall i :: 0 <= i < |channels| ==>
-        //             (i == channelIdx ==> result.channels[i] == channels[i] + [value]) &&
-        //             (i != channelIdx ==> result.channels[i] == channels[i])
     {
         reveal_WellFormed();
         DataflowProgramState(channels[channelIdx := channels[channelIdx] + [value]], processingElements)
@@ -389,66 +379,6 @@ datatype DataflowProgramState = DataflowProgramState(channels: seq<Channel>, pro
             }
 
             case _ => {}
-    }
-
-    lemma FirePEChannelChangeAuto(idx: PEIndex)
-        requires 0 <= idx < |processingElements|
-        requires WellFormed()
-        requires IsFireable(idx)
-
-        ensures |FirePE(idx).channels| == |channels|
-        ensures |FirePE(idx).processingElements| == |processingElements|
-
-        ensures FirePE(idx).processingElements[idx].Inputs() == processingElements[idx].Inputs()
-        ensures FirePE(idx).processingElements[idx].Outputs() == processingElements[idx].Outputs()
-
-        ensures forall i :: 0 <= i < |FirePE(idx).processingElements| && i != idx
-                            ==> FirePE(idx).processingElements[i] == processingElements[i]
-
-        requires WellFormed()
-
-        ensures forall channelIdx :: 0 <= channelIdx < |channels| ==> (
-                    var original := channels[channelIdx];
-                    var result := FirePE(idx).channels[channelIdx];
-                    var pe := processingElements[idx];
-                    
-                    (channelIdx in pe.WaitingInputs() && channelIdx in pe.WaitingOutputs() ==>
-                     |result| >= 1 && result[..|result| - 1] == original[1..]) &&
-
-                    (channelIdx in pe.WaitingInputs() && channelIdx !in pe.WaitingOutputs() ==>
-                     result == original[1..]) &&
-
-                    (channelIdx !in pe.WaitingInputs() && channelIdx in pe.WaitingOutputs() ==>
-                     |result| >= 1 && result[..|result| - 1] == original) &&
-
-                    (channelIdx !in pe.WaitingInputs() && channelIdx !in pe.WaitingOutputs() ==>
-                     result == original)
-                )
-    {
-        forall channelIdx | 0 <= channelIdx < |channels|
-            ensures (
-                var original := channels[channelIdx];
-                var result := FirePE(idx).channels[channelIdx];
-                var pe := processingElements[idx];
-                
-                (channelIdx in pe.WaitingInputs() && channelIdx in pe.WaitingOutputs() ==>
-                    |result| >= 1 && result[..|result| - 1] == original[1..]) &&
-
-                (channelIdx in pe.WaitingInputs() && channelIdx !in pe.WaitingOutputs() ==>
-                    result == original[1..]) &&
-
-                (channelIdx !in pe.WaitingInputs() && channelIdx in pe.WaitingOutputs() ==>
-                    |result| >= 1 && result[..|result| - 1] == original) &&
-
-                (channelIdx !in pe.WaitingInputs() && channelIdx !in pe.WaitingOutputs() ==>
-                    result == original)
-            )
-        {
-            var original := channels[channelIdx];
-            var result := FirePE(idx).channels[channelIdx];
-            var pe := processingElements[idx];
-            FirePEChannelChange(idx, channelIdx);
-        }
     }
 
     lemma CommutableFiring(idx1: PEIndex, idx2: PEIndex)

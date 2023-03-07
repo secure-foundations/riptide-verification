@@ -5,7 +5,7 @@ from permission import MemoryPermissionSolver
 
 
 def main():
-    with open("test.o2p") as f:
+    with open("sum.o2p") as f:
         graph = DataflowGraph.load_dataflow_graph(json.load(f))
         print(graph)
         

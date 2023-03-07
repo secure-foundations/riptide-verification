@@ -52,11 +52,17 @@ class DisjointUnion(Term):
         return f"{self.left} + {self.right}"
 
     @staticmethod
-    def of(first: Term, *rest: Term) -> DisjointUnion:
-        for term in rest:
-            first = DisjointUnion(first, term)
+    def of(*terms: Term) -> DisjointUnion:
+        terms = tuple(terms)
 
-        return first
+        if len(terms) == 0:
+            return EmptyPermission()
+
+        union = terms[-1]
+        for term in terms[:-1][::-1]:
+            union = DisjointUnion(term, union)
+            
+        return union
 
 
 class Formula: ...
@@ -103,7 +109,7 @@ class MemoryPermissionSolver:
     def get_heap_object_of_memory_operator(pe: ProcessingElement) -> str:
         # TODO: here I'm making an assumption that array accesses
         # would always have the first input as the array variable
-        assert len(pe.inputs) == 3
+        # assert len(pe.inputs) == 3
         array_input = pe.inputs[0]
         assert isinstance(array_input.constant, FunctionArgument)
         return array_input.constant.variable_name

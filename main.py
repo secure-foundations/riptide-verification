@@ -11,6 +11,8 @@ def main():
         
         MemoryPermissionSolver.generate_constraints(graph)
 
+        print(graph.generate_dot_description())
+
 
 if __name__ == "__main__":
     main()

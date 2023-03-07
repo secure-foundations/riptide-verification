@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import List, Tuple, Optional, Any, Dict
 from dataclasses import dataclass
 
+from operators import OPERATOR_INFO
+
 
 Value = int
 
@@ -96,7 +98,7 @@ class DataflowGraph:
 
         for i, vertex in enumerate(obj["vertices"]):
             if vertex["type"] == "STREAM_FU_CFG_T":
-                op = "STREAM"
+                op = "STREAM_FU_CFG_T"
 
             elif vertex["op"] == "CF_CFG_OP_STEER":
                 op = "CF_CFG_OP_STEER_TRUE" if vertex["pred"] == "CF_CFG_PRED_TRUE" else "CF_CFG_OP_STEER_FALSE"
@@ -111,3 +113,67 @@ class DataflowGraph:
             ))
 
         return DataflowGraph(tuple(vertices), tuple(channels))
+
+    def generate_dot_description(self: DataflowGraph) -> str:
+        """
+        Generate a visualization of the graph in dot format
+        """
+
+        elements: List[str] = []
+        constant_count = 0
+
+        for pe in self.vertices:
+            elements.append(f"v{pe.id} [{OPERATOR_INFO[pe.operator]['dot_attr']}]")
+
+        for channel in self.channels:
+            if channel.constant is None:
+                source_pe = self.vertices[channel.source]
+                dest_pe = self.vertices[channel.destination]
+
+                # If the input/output port position is specified, we use the specified position
+                # otherwise there may be ambiguity, so we mark the edge with the input/output port number
+                additional_attributes = ""
+
+                position = OPERATOR_INFO[source_pe.operator].get("dot_output_port_positions", {}).get(channel.source_port, "")
+                if position != "":
+                    additional_attributes += f" tailport={position}"
+                else:
+                    additional_attributes += f" taillabel={channel.source_port}"
+
+                position = OPERATOR_INFO[dest_pe.operator].get("dot_input_port_positions", {}).get(channel.destination_port, "")
+                if position != "":
+                    additional_attributes += f" headport={position}"
+                else:
+                    additional_attributes += f" headlabel={channel.destination_port}"
+
+                elements.append(f"v{channel.source}->v{channel.destination} [label={channel.id} arrowsize=0.4{additional_attributes}]")
+
+            else:
+                if isinstance(channel.constant, FunctionArgument):
+                    label = channel.constant.variable_name                    
+                else:
+                    assert isinstance(channel.constant, ConstantValue)
+                    label = str(channel.constant.value)
+
+                if channel.hold:
+                    label += " (hold)"
+
+                elements.append(f"c{constant_count} [label=\"{label}\" shape=plaintext fontsize=7 height=0.1]")
+
+                dest_pe = self.vertices[channel.destination]
+                position = OPERATOR_INFO[dest_pe.operator].get("dot_input_port_positions", {}).get(channel.destination_port, "")
+                if position != "":
+                    additional_attributes = f"headport={position}"
+                else:
+                    additional_attributes = f"headlabel={channel.destination_port}"
+
+                elements.append(f"c{constant_count}->v{channel.destination} [label={channel.id} arrowsize=0.4 {additional_attributes}]")
+                constant_count += 1
+
+        return """\
+digraph {
+  graph [fontname="courier"]
+  node [fontname="courier"]
+  edge [fontname="courier" fontsize=7]
+
+  """ + "\n  ".join(elements) + "\n}"

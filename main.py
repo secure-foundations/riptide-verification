@@ -1,7 +1,7 @@
 import json
 
 from graph import DataflowGraph
-from permission import MemoryPermissionSolver
+from permission import *
 
 
 def main():
@@ -9,9 +9,62 @@ def main():
         graph = DataflowGraph.load_dataflow_graph(json.load(f))
         print(graph)
         
-        MemoryPermissionSolver.generate_constraints(graph)
+        heap_objects, constraints = MemoryPermissionSolver.generate_constraints(graph)
+        for constraint in constraints:
+            print(constraint)
 
-        print(graph.generate_dot_description())
+        # MemoryPermissionSolver.solve_constraints(heap_objects, constraints)
+
+        MemoryPermissionSolver.solve_constraints(
+            ("A", "B"),
+            [
+                Inclusion(ReadPermission("A"), PermissionVariable(0)),
+                Inclusion(PermissionVariable(0), DisjointUnion.of(
+                    PermissionVariable(1),
+                    PermissionVariable(2),
+                )),
+                Inclusion(PermissionVariable(2), PermissionVariable(0)),
+                Inclusion(WritePermission("B"), PermissionVariable(2)),
+            ],
+        )
+
+        MemoryPermissionSolver.solve_constraints(
+            ("A", "B"),
+            [
+                Inclusion(DisjointUnion.of(
+                    PermissionVariable(0),
+                    PermissionVariable(1),
+                ), PermissionVariable(2)),
+                Inclusion(ReadPermission("A"), PermissionVariable(0)),
+                Inclusion(ReadPermission("A"), PermissionVariable(1)),
+            ],
+        )
+
+        MemoryPermissionSolver.solve_constraints(
+            ("A", "B"),
+            [
+                Inclusion(DisjointUnion.of(
+                    PermissionVariable(0),
+                    PermissionVariable(1),
+                ), PermissionVariable(2)),
+                Inclusion(WritePermission("A"), PermissionVariable(0)),
+                Inclusion(ReadPermission("A"), PermissionVariable(1)),
+            ],
+        )
+        
+        MemoryPermissionSolver.solve_constraints(
+            ("A", "B"),
+            [
+                Inclusion(DisjointUnion.of(
+                    PermissionVariable(0),
+                    PermissionVariable(1),
+                ), PermissionVariable(2)),
+                Inclusion(WritePermission("A"), PermissionVariable(0)),
+                Inclusion(WritePermission("A"), PermissionVariable(1)),
+            ],
+        )
+
+        # print(graph.generate_dot_description())
 
 
 if __name__ == "__main__":

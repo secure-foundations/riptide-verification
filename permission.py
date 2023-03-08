@@ -130,7 +130,7 @@ class RWPermissionPCM:
     A concrete description of the permission PCM in SMT
     
     ## Permission PCM
-    Given a set H of disjoint head object names, the permission partial commutative monoid P(H)
+    Given a set H of disjoint heap object names, the permission partial commutative monoid P(H)
     consists of the following elements:
       - Additive unit 0
       - read A for any A in H

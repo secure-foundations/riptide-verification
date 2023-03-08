@@ -114,7 +114,7 @@ class DataflowGraph:
 
         return DataflowGraph(tuple(vertices), tuple(channels))
 
-    def generate_dot_description(self: DataflowGraph, channel_label: Optional[Callable[[int], str]] = None) -> str:
+    def generate_dot_description(self: DataflowGraph, channel_label: Callable[[int], str] = str) -> str:
         """
         Generate a visualization of the graph in dot format
         """
@@ -149,7 +149,7 @@ class DataflowGraph:
                 if channel_label is not None:
                     additional_attributes += f" label=\"{channel_label(channel.id)}\""
 
-                elements.append(f"v{channel.source}->v{channel.destination} [label={channel.id} arrowsize=0.4{additional_attributes}]")
+                elements.append(f"v{channel.source}->v{channel.destination} [arrowsize=0.4{additional_attributes}]")
 
             else:
                 if isinstance(channel.constant, FunctionArgument):

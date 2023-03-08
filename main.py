@@ -60,7 +60,7 @@ def examples():
 
 
 def main():
-    with open("sum.o2p") as f:
+    with open("examples/sum.o2p") as f:
         graph = DataflowGraph.load_dataflow_graph(json.load(f))
         print(graph.generate_dot_description())
         

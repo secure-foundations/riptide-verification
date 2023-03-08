@@ -277,8 +277,8 @@ class RWPermissionPCM:
             right_interp, right_defined = self.interpret_term(assignment, formula.right)
             interp = smt.And(
                 smt.And(
-                    smt.Equals(left_interp.smt_terms[obj][0], right_interp.smt_terms[obj][0]),
-                    smt.Equals(left_interp.smt_terms[obj][1], right_interp.smt_terms[obj][1]),
+                    smt.Iff(left_interp.smt_terms[obj][0], right_interp.smt_terms[obj][0]),
+                    smt.Iff(left_interp.smt_terms[obj][1], right_interp.smt_terms[obj][1]),
                 )
                 for obj in self.heap_objects
             )
@@ -300,7 +300,7 @@ class RWPermissionPCM:
             return interp, defined
 
         if isinstance(formula, Disjoint):
-            subterm_interps = tuple(self.interpret(assignment, subterm) for subterm in formula.terms)
+            subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in formula.terms)
             interp = smt.And(
                 smt.Or(
                     # no write
@@ -363,7 +363,14 @@ class MemoryPermissionSolver:
             input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
             output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(sum(pe.outputs.values(), ()))
 
-            constraints.append(Inclusion(output_sum, input_sum))
+            if pe.operator == "CF_CFG_OP_CARRY":
+                assert len(pe.inputs) == 3
+                decider, input_a, input_b = pe.inputs
+                constraints.append(Inclusion(output_sum, MemoryPermissionSolver.get_sum_of_channel_permissions((decider, input_a))))
+                constraints.append(Inclusion(output_sum, MemoryPermissionSolver.get_sum_of_channel_permissions((decider, input_b))))
+            else:
+                # default constraint NOTE: may be too weak!
+                constraints.append(Inclusion(output_sum, input_sum))
 
             if pe.operator == "MEM_CFG_OP_LOAD":
                 heap_object = MemoryPermissionSolver.get_heap_object_of_memory_operator(pe)
@@ -388,7 +395,7 @@ class MemoryPermissionSolver:
         return tuple(heap_objects), constraints
 
     @staticmethod
-    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Dict[PermissionVariable, Term]:
+    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Optional[Dict[PermissionVariable, Term]]:
         free_vars: Set[PermissionVariable] = set()
 
         for constraint in constraints:
@@ -403,6 +410,7 @@ class MemoryPermissionSolver:
             assignment_defined = smt.And(assignment_defined, defined)
 
         pcm = RWPermissionPCM(heap_objects)
+        solution: Dict[PermissionVariable, Term] = {}
 
         with smt.Solver(name="z3") as solver:
             solver.add_assertion(assignment_defined)
@@ -418,7 +426,11 @@ class MemoryPermissionSolver:
                 print("found a solution:")
                 for var in free_vars:
                     term = assignment[var].get_value_from_smt_model(model)
+                    solution[var] = term
                     print(f"  {var} = {term}")
+
+                return solution
 
             else:
                 print("failed to find a solution")
+                return None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple, Optional, Any, Dict
+from typing import List, Tuple, Optional, Any, Dict, Mapping, Callable
 from dataclasses import dataclass
 
 from operators import OPERATOR_INFO
@@ -114,7 +114,7 @@ class DataflowGraph:
 
         return DataflowGraph(tuple(vertices), tuple(channels))
 
-    def generate_dot_description(self: DataflowGraph) -> str:
+    def generate_dot_description(self: DataflowGraph, channel_label: Optional[Callable[[int], str]] = None) -> str:
         """
         Generate a visualization of the graph in dot format
         """
@@ -146,6 +146,9 @@ class DataflowGraph:
                 else:
                     additional_attributes += f" headlabel={channel.destination_port}"
 
+                if channel_label is not None:
+                    additional_attributes += f" label=\"{channel_label(channel.id)}\""
+
                 elements.append(f"v{channel.source}->v{channel.destination} [label={channel.id} arrowsize=0.4{additional_attributes}]")
 
             else:
@@ -167,7 +170,10 @@ class DataflowGraph:
                 else:
                     additional_attributes = f"headlabel={channel.destination_port}"
 
-                elements.append(f"c{constant_count}->v{channel.destination} [label={channel.id} arrowsize=0.4 {additional_attributes}]")
+                if channel_label is not None:
+                    additional_attributes += f" label=\"{channel_label(channel.id)}\""
+
+                elements.append(f"c{constant_count}->v{channel.destination} [arrowsize=0.4 {additional_attributes}]")
                 constant_count += 1
 
         return """\

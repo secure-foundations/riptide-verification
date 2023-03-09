@@ -321,6 +321,67 @@ class RWPermissionPCM:
 
 
 class MemoryPermissionSolver:
+    @dataclass
+    class IOBehavior:
+        inputs: Tuple[int, ...]
+        outputs: Tuple[int, ...]
+
+    # Possible IO behvaior for each operator at any state
+    # For instance, CARRY has two states:
+    # In the first state, it only reads the 0 and 1 input channels;
+    # In the second state, it only reads the 0 and 2 input channels.
+    # The default () means the operator always reads from all inputs and writes to all outputs
+    OPERATOR_IO_BEHAVIORS: Dict[str, Tuple[IOBehavior, ...]] = {
+        "MISC_CFG_OP_NOP": (),
+        "ARITH_CFG_OP_ADD": (),
+        "ARITH_CFG_OP_GEP2": (),
+        "ARITH_CFG_OP_GEP4": (),
+        "ARITH_CFG_OP_SUB": (),
+        "MUL_CFG_OP_MUL": (),
+        "MUL_CFG_OP_CLIP": (),
+        "ARITH_CFG_OP_SHL": (),
+        "ARITH_CFG_OP_ASHR": (),
+        "ARITH_CFG_OP_AND": (),
+        "ARITH_CFG_OP_OR": (),
+        "ARITH_CFG_OP_XOR": (),
+        "ARITH_CFG_OP_EQ": (),
+        "ARITH_CFG_OP_NE": (),
+        "ARITH_CFG_OP_UGT": (),
+        "ARITH_CFG_OP_UGE": (),
+        "ARITH_CFG_OP_ULT": (),
+        "ARITH_CFG_OP_ULE": (),
+        "ARITH_CFG_OP_SGT": (),
+        "ARITH_CFG_OP_SGE": (),
+        "ARITH_CFG_OP_SLT": (),
+        "ARITH_CFG_OP_SLE": (),
+        "MEM_CFG_OP_LOAD": (),
+        "MEM_CFG_OP_STORE": (),
+        "CF_CFG_OP_SELECT": (),
+        "CF_CFG_OP_INVARIANT": (
+            IOBehavior((1,), (0,)),
+            IOBehavior((0, 1), (0,)),
+        ),
+        "CF_CFG_OP_CARRY": (
+            IOBehavior((1,), (0,)),
+            IOBehavior((0, 2), (0,)),
+        ),
+        "CF_CFG_OP_MERGE": (
+            IOBehavior((0, 1), (0,)),
+            IOBehavior((0, 2), (0,)),
+        ),
+        "CF_CFG_OP_ORDER": (),
+        "CF_CFG_OP_STEER_TRUE": (
+            IOBehavior((0, 1), (0,)),
+        ),
+        "CF_CFG_OP_STEER_FALSE": (
+            IOBehavior((0, 1), (0,)),
+        ),
+        "STREAM_FU_CFG_T": (
+            IOBehavior((0, 1, 2), (0, 1)),
+            IOBehavior((2,), (0, 1)),
+        ),
+    }
+
     @staticmethod
     def get_sum_of_channel_permissions(channels: Iterable[Channel]) -> Term:
         return DisjointUnion.of(*map(lambda c: PermissionVariable(c.id), channels))
@@ -360,29 +421,42 @@ class MemoryPermissionSolver:
         constraints: List[Formula] = []
 
         for pe in graph.vertices:
-            input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
-            output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(sum(pe.outputs.values(), ()))
+            assert pe.operator in MemoryPermissionSolver.OPERATOR_IO_BEHAVIORS
 
-            if pe.operator == "CF_CFG_OP_CARRY":
-                assert len(pe.inputs) == 3
-                decider, input_a, input_b = pe.inputs
-                constraints.append(Inclusion(output_sum, MemoryPermissionSolver.get_sum_of_channel_permissions((decider, input_a))))
-                constraints.append(Inclusion(output_sum, MemoryPermissionSolver.get_sum_of_channel_permissions((decider, input_b))))
-            else:
-                # default constraint NOTE: may be too weak!
+            io_behvaiors = MemoryPermissionSolver.OPERATOR_IO_BEHAVIORS[pe.operator]
+
+            if len(io_behvaiors) == 0:
+                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
+                output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(sum(pe.outputs.values(), ()))
                 constraints.append(Inclusion(output_sum, input_sum))
 
+            else:
+                # Specific IO behavior
+                for io_behavior in io_behvaiors:
+                    selected_inputs = tuple(map(lambda i: pe.inputs[i], io_behavior.inputs))
+                    selected_outputs = sum(map(lambda o: pe.outputs.get(o, ()), io_behavior.outputs), ())
+
+                    input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(selected_inputs)
+                    output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(selected_outputs)
+                    constraints.append(Inclusion(output_sum, input_sum))
+
+            # Constraints for load/store
             if pe.operator == "MEM_CFG_OP_LOAD":
+                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
                 heap_object = MemoryPermissionSolver.get_heap_object_of_memory_operator(pe)
                 constraints.append(Inclusion(WritePermission(heap_object), input_sum))
                 
             elif pe.operator == "MEM_CFG_OP_STORE":
+                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
                 heap_object = MemoryPermissionSolver.get_heap_object_of_memory_operator(pe)
                 constraints.append(Inclusion(WritePermission(heap_object), input_sum))
 
+        # Hold channels are allowed to have permissions disjoint from all other channels
         for channel in graph.channels:
             if channel.hold:
-                constraints.append(Equality(PermissionVariable(channel.id), EmptyPermission()))
+                for other in graph.channels:
+                    if other.id != channel.id:
+                        constraints.append(Disjoint((PermissionVariable(channel.id), PermissionVariable(other.id))))
 
         constant_channel_vars: List[PermissionVariable] = []
 
@@ -423,14 +497,11 @@ class MemoryPermissionSolver:
             if solver.solve():
                 model = solver.get_model()
 
-                print("found a solution:")
                 for var in free_vars:
                     term = assignment[var].get_value_from_smt_model(model)
                     solution[var] = term
-                    print(f"  {var} = {term}")
 
                 return solution
 
             else:
-                print("failed to find a solution")
                 return None

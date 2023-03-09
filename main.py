@@ -1,5 +1,7 @@
 import json
 
+from argparse import ArgumentParser
+
 from graph import DataflowGraph
 from permission import *
 
@@ -60,17 +62,29 @@ def examples():
 
 
 def main():
-    with open("examples/sum.o2p") as f:
-        graph = DataflowGraph.load_dataflow_graph(json.load(f))
-        print(graph.generate_dot_description())
+    parser = ArgumentParser()
+    parser.add_argument("o2p", help="Dataflow program description (.o2p file)")
+    args = parser.parse_args()
+
+    with open(args.o2p) as o2p_file:
+        graph = DataflowGraph.load_dataflow_graph(json.load(o2p_file))
+        print(graph.generate_dot_description(lambda id: f"p{id}"))
         
         heap_objects, constraints = MemoryPermissionSolver.generate_constraints(graph)
+
+        print("constraints:")
         for constraint in constraints:
             print(f"  {constraint}")
 
         solution = MemoryPermissionSolver.solve_constraints(heap_objects, constraints)
 
-        print(graph.generate_dot_description(lambda id: f"p{id} = {solution[PermissionVariable(id)]}"))
+        if solution is None:
+            print("unable to find a solution")
+        else:
+            for var, term in solution.items():
+                print(f"  {var} = {term}")
+
+            print(graph.generate_dot_description(lambda id: f"p{id} = {solution[PermissionVariable(id)]}"))
 
 
 if __name__ == "__main__":

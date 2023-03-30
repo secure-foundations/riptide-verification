@@ -88,14 +88,20 @@ class StreamOperator(Operator):
             end = yield PopChannelAction(1)
             step = yield PopChannelAction(2)
 
+            print("what", first, end, step)
+
             self.current = smt.Plus(first, step)
             self.end = end
             
             yield PushChannelAction(0, first)
             yield PushChannelAction(1, smt.FALSE())
 
+            print("end")
+
         else:
             step = yield PopChannelAction(2)
+
+            print("next", step)
 
             def true_branch(self) -> TransitionGenerator:
                 yield PushChannelAction(1, smt.TRUE())
@@ -108,7 +114,7 @@ class StreamOperator(Operator):
             yield BranchAction(smt.GE(self.current, self.end), true_branch, false_branch)
 
     def copy(self) -> StreamOperator:
-        copied = self.copy()
+        copied = super().copy()
         copied.current = self.current
         copied.end = self.end
         return copied
@@ -172,8 +178,8 @@ class TransitionState:
     generator: TransitionGenerator
     transcript: List[SymbolicMemoryUpdate]
 
-    def copy(self) -> TransitionGenerator:
-        return TransitionGenerator(self.generator, list(self.transcript))
+    def copy(self) -> TransitionState:
+        return TransitionState(self.generator, list(self.transcript))
 
 
 @dataclass
@@ -223,17 +229,23 @@ class SymbolicExecutor:
         # Initialize channel states
         channel_states: List[ChannelState] = []
         for channel in graph.channels:
-            if channel.constant is not None and channel.hold:
+            if channel.constant is not None:
                 if isinstance(channel.constant, ConstantValue):
-                    state = ChannelState()
-                    state.push(self.get_fresh_permissioned_value(smt.Int(channel.constant.value)))
-
+                    value = self.get_fresh_permissioned_value(smt.Int(channel.constant.value))
+                
                 else:
                     assert isinstance(channel.constant, FunctionArgument)
                     name = channel.constant.variable_name
                     assert name in free_vars, f"unable to find an assignment to free var {name}"
-                    state = ChannelState(self.get_fresh_permissioned_value(free_vars[name]))
-            
+                    value = self.get_fresh_permissioned_value(free_vars[name])
+
+                if channel.hold:
+                    state = ChannelState(value)
+                
+                else:
+                    state = ChannelState()
+                    state.push(value)
+
             else:
                 # normal, empty channel
                 state = ChannelState()
@@ -265,19 +277,29 @@ class SymbolicExecutor:
         for pe_info, operator_state, transition_state in \
             zip(self.graph.vertices, configuration.operator_states, configuration.transition_states):
             if transition_state is not None:
-                assert isinstance(transition_state.transcript[-1], PopChannelAction), "not supported"
-            
-                channel_id = pe_info.inputs[transition_state.transcript[-1].input_index].id
+                blocking_action = transition_state.transcript[-1]
+                if isinstance(blocking_action, PopChannelAction):
                 
-                if configuration.channel_states[channel_id].ready():
-                    transition_state.generator.send(configuration.channel_states[channel_id].pop().term)
+                    channel_id = pe_info.inputs[blocking_action.input_index].id
+                    
+                    if configuration.channel_states[channel_id].ready():
+                        transition_state.generator.send(configuration.channel_states[channel_id].pop().term)
+
+                    else:
+                        # not ready to execute the transition yet
+                        continue
+                    
+                elif isinstance(blocking_action, BranchAction):
+                    pass
 
                 else:
-                    # not ready to execute the transition yet
-                    continue
+                    assert False, f"unexpected blocking action {blocking_action}"
+
             else:
                 transition_state = TransitionState(operator_state.transition(), [])
                 configuration.transition_states[pe_info.id] = transition_state
+
+            # print(pe_info)
 
             # try to continue executing the transition function
             send_value = None
@@ -297,12 +319,13 @@ class SymbolicExecutor:
                             break
 
                     elif isinstance(action, PushChannelAction):
-                        channels = pe_info.outputs[action.output_index]
-                        
-                        for channel in channels:
-                            channel_state = configuration.channel_states[channel.id]
-                            channel_state.push(PermissionedValue(action.value, self.get_fresh_permission_var()))
-                        
+                        if action.output_index in pe_info.outputs:
+                            channels = pe_info.outputs[action.output_index]
+                            
+                            for channel in channels:
+                                channel_state = configuration.channel_states[channel.id]
+                                channel_state.push(PermissionedValue(action.value, self.get_fresh_permission_var()))
+                            
                         send_value = None
 
                     elif isinstance(action, ReadMemoryAction):
@@ -316,10 +339,12 @@ class SymbolicExecutor:
                         configuration_true = configuration
                         configuration_false = configuration.copy()
 
-                        configuration_true.transition_states[pe_info.id] = TransitionState(action.true_branch(), transition_state.transcript)
+                        configuration_true.transition_states[pe_info.id] = \
+                            TransitionState(action.true_branch(configuration_true.operator_states[pe_info.id]), transition_state.transcript)
                         configuration_true.path_condition.append(action.condition)
                         
-                        configuration_false.transition_states[pe_info.id] = TransitionState(action.false_branch(), transition_state.transcript)
+                        configuration_false.transition_states[pe_info.id] = \
+                            TransitionState(action.false_branch(configuration_false.operator_states[pe_info.id]), transition_state.transcript)
                         configuration_false.path_condition.append(smt.Not(action.condition))
 
                         return configuration_true, configuration_false
@@ -330,5 +355,6 @@ class SymbolicExecutor:
                 except StopIteration:
                     # TODO: accumulate new permission constraints
                     configuration.transition_states[pe_info.id] = None
+                    break
 
         return configuration,

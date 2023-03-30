@@ -13,11 +13,22 @@ def main():
     executor = SymbolicExecutor(dfg, {
         r"array1": smt.FreshSymbol(smt.INT),
         r"array2": smt.FreshSymbol(smt.INT),
-        r"len": smt.FreshSymbol(smt.INT),
+        r"len": smt.Int(3), # smt.FreshSymbol(smt.INT),
     })
 
-    configs = executor.step(executor.configurations[0])
-    print(configs)
+    config = executor.configurations[0]
+
+    # print(config)
+
+    while True:
+        configs = executor.step(config)
+
+        if len(configs) != 1:
+            print(configs)
+            break
+        else:
+            config = configs[0]
+            print(config)
 
 
 if __name__ == "__main__":

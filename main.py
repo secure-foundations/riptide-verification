@@ -16,19 +16,17 @@ def main():
         r"len": smt.Int(3), # smt.FreshSymbol(smt.INT),
     })
 
-    config = executor.configurations[0]
+    configs = [executor.configurations[0]]
 
-    # print(config)
+    while len(configs):
+        config = configs.pop(0)
+        next_configs = executor.step(config)
 
-    while True:
-        configs = executor.step(config)
-
-        if len(configs) != 1:
-            print(configs)
+        if len(next_configs) == 0:
+            print(config)
             break
         else:
-            config = configs[0]
-            print(config)
+            configs.extend(next_configs)
 
 
 if __name__ == "__main__":

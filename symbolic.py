@@ -36,24 +36,73 @@ class Operator:
             return cls
         return wrapper
     
-    def __init__(self, pe: ProcessingElement, transition: Optional[TransitionFunction] = None):
+    def __init__(self, pe: ProcessingElement, permission: permission.PermissionVariable, transition: Optional[TransitionFunction] = None):
         self.pe = pe
+        self.internal_permission: permission.PermissionVariable = permission
         self.current_transition: TransitionFunction = transition or type(self).start
 
     def transition_to(self, transition: TransitionFunction):
         self.current_transition = transition
 
-    def start(self, config: SymbolicConfiguration) -> TransitionGenerator:
+    def start(self, config: SymbolicConfiguration):
         raise NotImplementedError()
     
     def copy(self) -> Operator:
-        return type(self)(self.pe, self.current_transition)
+        return type(self)(self.pe, self.internal_permission, self.current_transition)
 
 
 @Operator.implement("ARITH_CFG_OP_ADD")
 class AddOperator(Operator):
-    def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> Tuple[ChannelId(0)]:
+    def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.Plus(a, b)
+
+
+@Operator.implement("CF_CFG_OP_CARRY")
+class CarryOperator(Operator):
+    def start(self, config: SymbolicConfiguration, a: ChannelId(1)) -> ChannelId(0):
+        self.transition_to(CarryOperator.loop)
+        return a
+    
+    def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
+        return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.start, CarryOperator.pass_b)
+    
+    def pass_b(self, config: SymbolicConfiguration, b: ChannelId(2)) -> ChannelId(0):
+        self.transition_to(CarryOperator.loop)
+        return b
+
+
+@Operator.implement("CF_CFG_OP_STEER_TRUE")
+class TrueSteerOperator(Operator):
+    def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
+        return Branching(smt.Equals(decider, smt.Int(0)), TrueSteerOperator.start, TrueSteerOperator.pass_value)
+    
+    def pass_value(self, config: SymbolicConfiguration, value: ChannelId(1)) -> ChannelId(0):
+        self.transition_to(TrueSteerOperator.start)
+        return value
+
+
+@Operator.implement("CF_CFG_OP_INVARIANT")
+class InvariantOperator(Operator):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.value: Optional[smt.SMTTerm] = None
+
+    def copy(self) -> StreamOperator:
+        copied = super().copy()
+        copied.value = self.value
+        return copied
+
+    def start(self, config: SymbolicConfiguration, value: ChannelId(1)) -> ChannelId(0):
+        self.transition_to(InvariantOperator.loop)
+        self.value = value
+        return value
+    
+    def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
+        return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.start, InvariantOperator.invariant)
+    
+    def invariant(self, config: SymbolicConfiguration) -> ChannelId(0):
+        self.transition_to(InvariantOperator.loop)
+        return self.value
 
 
 @Operator.implement("STREAM_FU_CFG_T")
@@ -63,6 +112,12 @@ class StreamOperator(Operator):
 
         self.current: Optional[smt.SMTTerm] = None
         self.end: Optional[smt.SMTTerm] = None
+    
+    def copy(self) -> StreamOperator:
+        copied = super().copy()
+        copied.current = self.current
+        copied.end = self.end
+        return copied
 
     def start(self, config: SymbolicConfiguration, first: ChannelId(0), end: ChannelId(1)):
         self.current = first
@@ -77,46 +132,13 @@ class StreamOperator(Operator):
         self.current = None
         self.end = None
         self.transition_to(StreamOperator.start)
-        return smt.Int(1)
+        return smt.Int(0)
     
     def not_end(self, config: SymbolicConfiguration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
         current = self.current
         self.current = smt.Plus(self.current, step)
         self.transition_to(StreamOperator.loop)
-        return current, smt.Int(0)
-
-    # def transition(self) -> TransitionGenerator:
-    #     if self.current is None:
-    #         first = yield PopChannelAction(0)
-    #         end = yield PopChannelAction(1)
-    #         step = yield PopChannelAction(2)
-
-    #         self.current = smt.Plus(first, step)
-    #         self.end = end
-            
-    #         yield PushChannelAction(0, first)
-    #         yield PushChannelAction(1, smt.FALSE())
-
-    #     else:
-    #         step = yield PopChannelAction(2)
-
-    #         def true_branch(self) -> TransitionGenerator:
-    #             yield PushChannelAction(1, smt.TRUE())
-    #             self.current = None
-    #             self.end = None
-
-    #         def false_branch(self) -> TransitionGenerator:
-    #             yield PushChannelAction(0, self.current)
-    #             yield PushChannelAction(1, smt.FALSE())
-    #             self.current = smt.Plus(self.current, step)
-
-    #         yield BranchAction(smt.GE(self.current, self.end), true_branch, false_branch)
-
-    def copy(self) -> StreamOperator:
-        copied = super().copy()
-        copied.current = self.current
-        copied.end = self.end
-        return copied
+        return current, smt.Int(1)
 
 
 @Operator.implement("MEM_CFG_OP_STORE")
@@ -140,6 +162,27 @@ class StoreOperator(Operator):
     def start_4(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), value: ChannelId(2), sync: ChannelId(3)) -> ChannelId(0):
         config.write_memory(base, index, value)
         return smt.Int(1)
+    
+
+@Operator.implement("MEM_CFG_OP_LOAD")
+class LoadOperator(Operator):
+    def __init__(self, *args):
+        super().__init__(*args)
+        
+        if len(self.pe.inputs) == 2:
+            self.transition_to(LoadOperator.start_2)
+        
+        elif len(self.pe.inputs) == 3:
+            self.transition_to(LoadOperator.start_3)
+        
+        else:
+            assert False, "unexpected number of input channels to the store operator"
+
+    def start_2(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1)) -> ChannelId(0):
+        return config.read_memory(base, index)
+
+    def start_3(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), sync: ChannelId(3)) -> ChannelId(0):
+        return config.read_memory(base, index)
 
 
 @dataclass
@@ -184,28 +227,44 @@ class SymbolicMemoryUpdate:
 class SymbolicConfiguration:
     operator_states: Tuple[Operator, ...]
     channel_states: Tuple[ChannelState, ...]
-    memory: List[SymbolicMemoryUpdate] = field(default_factory=list)
 
-    path_conditions: List[smt.SMTTerm] = field(default_factory=list)
+    # Memory is currently modelled as a map
+    # base |-> array of ints
+    # This is assuming all bases represent disjoint regions of memory
+    memory: List[SymbolicMemoryUpdate] = field(default_factory=list)
+    memory_var: smt.SMTTerm = field(default_factory=lambda: SymbolicConfiguration.get_fresh_memory_var())
+    memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
+
+    path_constraints: List[smt.SMTTerm] = field(default_factory=list)
     permission_constraints: List[permission.Formula] = field(default_factory=list)
 
-    def copy(self) -> SymbolicConfiguration:
-        operator_states = tuple(operator.copy() for operator in self.operator_states)
-        channel_states = tuple(state.copy() for state in self.channel_states)
-        memory = list(self.memory)
-        path_conditions = list(self.path_conditions)
-        permission_constraints = list(self.permission_constraints)
+    @staticmethod
+    def get_fresh_memory_var() -> smt.SMTTerm:
+        return smt.FreshSymbol(smt.ArrayType(smt.INT, smt.ArrayType(smt.INT, smt.INT)))
 
+    def copy(self) -> SymbolicConfiguration:
         return SymbolicConfiguration(
-            operator_states,
-            channel_states,
-            memory,
-            path_conditions,
-            permission_constraints,
+            tuple(operator.copy() for operator in self.operator_states),
+            tuple(state.copy() for state in self.channel_states),
+            list(self.memory),
+            self.memory_var,
+            list(self.memory_constraints),
+            list(self.path_constraints),
+            list(self.permission_constraints),
         )
     
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
         self.memory.append(SymbolicMemoryUpdate(base, index, value))
+
+        new_var = SymbolicConfiguration.get_fresh_memory_var()
+        self.memory_constraints.append(smt.Equals(
+            new_var,
+            smt.Store(self.memory_var, base, smt.Store(smt.Select(self.memory_var, base), index, value)),
+        ))
+        self.memory_var = new_var
+
+    def read_memory(self, base: smt.SMTTerm, index: smt.SMTTerm) -> smt.SMTTerm:
+        return smt.Select(smt.Select(self.memory_var, base), index)
 
 
 class SymbolicExecutor:
@@ -214,14 +273,18 @@ class SymbolicExecutor:
 
         self.free_vars = dict(free_vars)
         self.permission_var_count = 0
+        
+        initial_permissions: List[permission.PermissionVariable] = []
 
         # Initialize operator implementations
         operator_impl: List[Operator] = []
-        for vertex in graph.vertices:
+        for i, vertex in enumerate(graph.vertices):
             assert vertex.operator in Operator.OPERATOR_IMPL_MAP, \
                    f"unable to find an implementation for operator {vertex.operator}"
             impl = Operator.OPERATOR_IMPL_MAP[vertex.operator]
-            operator_impl.append(impl(vertex))
+            perm_var = self.get_fresh_permission_var(f"internal-{i}-")
+            initial_permissions.append(perm_var)
+            operator_impl.append(impl(vertex, perm_var))
 
         # Initialize channel states
         channel_states: List[ChannelState] = []
@@ -235,6 +298,8 @@ class SymbolicExecutor:
                     name = channel.constant.variable_name
                     assert name in free_vars, f"unable to find an assignment to free var {name}"
                     value = self.get_fresh_permissioned_value(free_vars[name])
+
+                initial_permissions.append(value.permission)
 
                 if channel.hold:
                     state = ChannelState(value)
@@ -251,19 +316,22 @@ class SymbolicExecutor:
 
         init_config = SymbolicConfiguration(tuple(operator_impl), tuple(channel_states))
 
+        # All initial permissions have to be disjoint
+        init_config.permission_constraints.append(permission.Disjoint(tuple(initial_permissions)))
+
         self.configurations: List[SymbolicConfiguration] = [init_config]
 
     def get_fresh_permissioned_value(self, value: smt.SMTTerm) -> PermissionedValue:
         return PermissionedValue(value, self.get_fresh_permission_var())
 
-    def get_fresh_permission_var(self) -> permission.PermissionVariable:
-        var = permission.PermissionVariable(f"p{self.permission_var_count}")
+    def get_fresh_permission_var(self, prefix="p") -> permission.PermissionVariable:
+        var = permission.PermissionVariable(f"{prefix}{self.permission_var_count}")
         self.permission_var_count += 1
         return var
     
     def check_branch_feasibility(self, configuration: SymbolicConfiguration) -> bool:
         with smt.Solver(name="z3") as solver:
-            for path_condition in configuration.path_conditions:
+            for path_condition in configuration.path_constraints:
                 solver.add_assertion(path_condition)
 
             # true for sat, false for unsat
@@ -335,9 +403,12 @@ class SymbolicExecutor:
             changed = True
 
             # Pop values from the input channels
+            input_permissions: List[permission.PermissionVariable] = [operator_state.internal_permission]
             input_values = []
             for channel_id in input_channel_ids:
-                input_values.append(configuration.channel_states[channel_id].pop().term)
+                value = configuration.channel_states[channel_id].pop()
+                input_permissions.append(value.permission)
+                input_values.append(value.term)
 
             # Run the transition
             output_values = transition(operator_state, configuration, *input_values)
@@ -353,37 +424,77 @@ class SymbolicExecutor:
 
             assert len(output_values) == len(output_actions), f"output of transition {transition} does not match its specification"
 
-            for value, action in zip(output_values, output_actions):
-                if action is Branching:
-                    assert len(output_values) == 1, "cannot combine branching with other output actions"
-                    assert isinstance(value, Branching), f"output of transition {transition} does not match its specification"
+            # If the operation is a store or load
+            # Add additional permission constraint of read/write A <= input permissions
+            if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
+                # TODO: right now we assume that the base is always one of the free variables
+                assert isinstance(pe_info.inputs[0].constant, FunctionArgument)
+                var_name = pe_info.inputs[0].constant.variable_name
+                assert var_name in self.free_vars
 
-                    configuration_true = configuration
-                    configuration_false = configuration.copy()
-
-                    configuration_true.operator_states[pe_info.id].current_transition = value.true_branch
-                    configuration_true.path_conditions.append(value.condition)
-
-                    configuration_false.operator_states[pe_info.id].current_transition = value.false_branch
-                    configuration_false.path_conditions.append(smt.Not(value.condition))
-
-                    if not self.check_branch_feasibility(configuration_true):
-                        configuration = configuration_false
-                        # since the negation is unsat, the condition itself must be valid
-                        configuration.path_conditions.pop(-1)
-                        continue
-
-                    if not self.check_branch_feasibility(configuration_false):
-                        configuration = configuration_true
-                        configuration.path_conditions.pop(-1)
-                        continue
-
-                    return configuration_true, configuration_false
+                mem_permission = permission.ReadPermission(var_name) if isinstance(operator_state, LoadOperator) else \
+                                 permission.WritePermission(var_name)
                 
-                elif isinstance(action, ChannelId) and action.id in pe_info.outputs:
+                configuration.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
+
+            # Update internal permission
+            operator_state.internal_permission = self.get_fresh_permission_var(f"internal-{pe_info.id}-")
+            output_permissions: List[permission.PermissionVariable] = [operator_state.internal_permission]
+
+            if len(output_actions) == 1 and output_actions[0] is Branching:
+                # A single branching action
+                output_value = output_values[0]
+                assert isinstance(output_value, Branching), f"output of transition {transition} does not match its specification"
+
+                configuration_true = configuration
+                configuration_false = configuration.copy()
+
+                permission_constraint = permission.Inclusion(
+                    permission.DisjointUnion.of(*output_permissions),
+                    permission.DisjointUnion.of(*input_permissions),
+                )
+
+                configuration_true.operator_states[pe_info.id].current_transition = output_value.true_branch
+                configuration_true.path_constraints.append(output_value.condition.simplify())
+                configuration_true.permission_constraints.append(permission_constraint)
+
+                configuration_false.operator_states[pe_info.id].current_transition = output_value.false_branch
+                configuration_false.path_constraints.append(smt.Not(output_value.condition).simplify())
+                configuration_false.permission_constraints.append(permission_constraint)
+
+                if not self.check_branch_feasibility(configuration_true):
+                    configuration = configuration_false
+                    # since the negation is unsat, the condition itself must be valid
+                    configuration.path_constraints.pop(-1)
+                    continue
+
+                if not self.check_branch_feasibility(configuration_false):
+                    configuration = configuration_true
+                    configuration.path_constraints.pop(-1)
+                    continue
+
+                return configuration_true, configuration_false
+            else:
+                # Output channels
+                for value, action in zip(output_values, output_actions):
+                    assert isinstance(action, ChannelId), f"unexpected action {action}"
+                    if action.id not in pe_info.outputs:
+                        continue
+
                     channels = pe_info.outputs[action.id]
                     for channel in channels:
-                        configuration.channel_states[channel.id].push(self.get_fresh_permissioned_value(value))
+                        permissioned_value = self.get_fresh_permissioned_value(value.simplify())
+                        configuration.channel_states[channel.id].push(permissioned_value)
+                        output_permissions.append(permissioned_value.permission)
+
+                # Add permission constraint:
+                #   output_permission + new_internal_permission <= input_permission + old_internal_permission
+                permission_constraint = permission.Inclusion(
+                    permission.DisjointUnion.of(*output_permissions),
+                    permission.DisjointUnion.of(*input_permissions),
+                )
+
+                configuration.permission_constraints.append(permission_constraint)
 
         if not changed:
             return ()

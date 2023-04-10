@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import Set, Tuple, Iterable, List, Dict, Mapping
+from typing import Set, Tuple, Iterable, List, Dict, Mapping, Optional
 from dataclasses import dataclass
 
 from dataflow import DataflowGraph, FunctionArgument, Channel, ProcessingElement
@@ -321,152 +321,25 @@ class RWPermissionPCM:
 
 
 class MemoryPermissionSolver:
-    @dataclass
-    class IOBehavior:
-        inputs: Tuple[int, ...]
-        outputs: Tuple[int, ...]
-
-    # Possible IO behvaior for each operator at any state
-    # For instance, CARRY has two states:
-    # In the first state, it only reads the 0 and 1 input channels;
-    # In the second state, it only reads the 0 and 2 input channels.
-    # The default () means the operator always reads from all inputs and writes to all outputs
-    OPERATOR_IO_BEHAVIORS: Dict[str, Tuple[IOBehavior, ...]] = {
-        "MISC_CFG_OP_NOP": (),
-        "ARITH_CFG_OP_ADD": (),
-        "ARITH_CFG_OP_GEP2": (),
-        "ARITH_CFG_OP_GEP4": (),
-        "ARITH_CFG_OP_SUB": (),
-        "MUL_CFG_OP_MUL": (),
-        "MUL_CFG_OP_CLIP": (),
-        "ARITH_CFG_OP_SHL": (),
-        "ARITH_CFG_OP_ASHR": (),
-        "ARITH_CFG_OP_AND": (),
-        "ARITH_CFG_OP_OR": (),
-        "ARITH_CFG_OP_XOR": (),
-        "ARITH_CFG_OP_EQ": (),
-        "ARITH_CFG_OP_NE": (),
-        "ARITH_CFG_OP_UGT": (),
-        "ARITH_CFG_OP_UGE": (),
-        "ARITH_CFG_OP_ULT": (),
-        "ARITH_CFG_OP_ULE": (),
-        "ARITH_CFG_OP_SGT": (),
-        "ARITH_CFG_OP_SGE": (),
-        "ARITH_CFG_OP_SLT": (),
-        "ARITH_CFG_OP_SLE": (),
-        "MEM_CFG_OP_LOAD": (),
-        "MEM_CFG_OP_STORE": (),
-        "CF_CFG_OP_SELECT": (),
-        "CF_CFG_OP_INVARIANT": (
-            IOBehavior((1,), (0,)),
-            IOBehavior((0, 1), (0,)),
-        ),
-        "CF_CFG_OP_CARRY": (
-            IOBehavior((1,), (0,)),
-            IOBehavior((0, 2), (0,)),
-        ),
-        "CF_CFG_OP_MERGE": (
-            IOBehavior((0, 1), (0,)),
-            IOBehavior((0, 2), (0,)),
-        ),
-        "CF_CFG_OP_ORDER": (),
-        "CF_CFG_OP_STEER_TRUE": (
-            IOBehavior((0, 1), (0,)),
-        ),
-        "CF_CFG_OP_STEER_FALSE": (
-            IOBehavior((0, 1), (0,)),
-        ),
-        "STREAM_FU_CFG_T": (
-            IOBehavior((0, 1, 2), (0, 1)),
-            IOBehavior((2,), (0, 1)),
-        ),
-    }
-
     @staticmethod
-    def get_sum_of_channel_permissions(channels: Iterable[Channel]) -> Term:
-        return DisjointUnion.of(*map(lambda c: PermissionVariable(c.id), channels))
+    def get_static_heap_objects(graph: DataflowGraph) -> Tuple[str, ...]:
+        """
+        Read all static heap objects from a graph
+        """
 
-    @staticmethod
-    def get_heap_object_of_memory_operator(pe: ProcessingElement) -> str:
-        # TODO: here I'm making an assumption that array accesses
-        # would always have the first input as the array variable
-        # assert len(pe.inputs) == 3
-        array_input = pe.inputs[0]
-        assert isinstance(array_input.constant, FunctionArgument)
-        return array_input.constant.variable_name
-
-    @staticmethod
-    def generate_constraints(graph: DataflowGraph) -> Tuple[Tuple[str, ...], Tuple[Formula, ...]]:
-        heap_objects: Set[str] = set() # names of heap objects
-
-        # we assume that these heap objects do not alias
-        # i.e. when they are declared in the source file
-        # they should have the "restrict" modifier
+        found = set()
+        heap_objects = []
 
         for pe in graph.vertices:
-            if pe.operator == "MEM_CFG_OP_LOAD" or pe.operator == "MEM_CFG_OP_STORE":
-                heap_objects.add(MemoryPermissionSolver.get_heap_object_of_memory_operator(pe))
+            if pe.operator in ("MEM_CFG_OP_LOAD", "MEM_CFG_OP_STORE"):
+                assert isinstance(pe.inputs[0].constant, FunctionArgument)
+                name = pe.inputs[0].constant.variable_name
 
-        # Constraints:
-        # 1. (Affinity) for each operator, the sum of input permissions contains the sum of output permissions,
-        #    and the input permissions are disjoint.
-        # 2. (Read permission) for a load operator on heap object A, (read A) must be in one of the input permissions.
-        # 3. (Write permission) for a store operator on heap object B, (write A) must be in one of the input permissions.
-        # 4. Channels with hold=true (infinite number of constant values) must have empty permission.
-        #    NOTE: this condition might be too strong
-        # 5. Channels with a single initial constant value should have mutually disjoint memory permissions.
+                if name not in found:
+                    found.add(name)
+                    heap_objects.append(name)
 
-        print("found heap objects", heap_objects)
-
-        constraints: List[Formula] = []
-
-        for pe in graph.vertices:
-            assert pe.operator in MemoryPermissionSolver.OPERATOR_IO_BEHAVIORS
-
-            io_behvaiors = MemoryPermissionSolver.OPERATOR_IO_BEHAVIORS[pe.operator]
-
-            if len(io_behvaiors) == 0:
-                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
-                output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(sum(pe.outputs.values(), ()))
-                constraints.append(Inclusion(output_sum, input_sum))
-
-            else:
-                # Specific IO behavior
-                for io_behavior in io_behvaiors:
-                    selected_inputs = tuple(map(lambda i: pe.inputs[i], io_behavior.inputs))
-                    selected_outputs = sum(map(lambda o: pe.outputs.get(o, ()), io_behavior.outputs), ())
-
-                    input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(selected_inputs)
-                    output_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(selected_outputs)
-                    constraints.append(Inclusion(output_sum, input_sum))
-
-            # Constraints for load/store
-            if pe.operator == "MEM_CFG_OP_LOAD":
-                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
-                heap_object = MemoryPermissionSolver.get_heap_object_of_memory_operator(pe)
-                constraints.append(Inclusion(WritePermission(heap_object), input_sum))
-                
-            elif pe.operator == "MEM_CFG_OP_STORE":
-                input_sum = MemoryPermissionSolver.get_sum_of_channel_permissions(pe.inputs)
-                heap_object = MemoryPermissionSolver.get_heap_object_of_memory_operator(pe)
-                constraints.append(Inclusion(WritePermission(heap_object), input_sum))
-
-        # Hold channels are allowed to have permissions disjoint from all other channels
-        for channel in graph.channels:
-            if channel.hold:
-                for other in graph.channels:
-                    if other.id != channel.id:
-                        constraints.append(Disjoint((PermissionVariable(channel.id), PermissionVariable(other.id))))
-
-        constant_channel_vars: List[PermissionVariable] = []
-
-        for channel in graph.channels:
-            if channel.constant is not None and not channel.hold:
-                constant_channel_vars.append(PermissionVariable(channel.id))
-
-        constraints.append(Disjoint(constant_channel_vars))
-
-        return tuple(heap_objects), constraints
+        return tuple(heap_objects)
 
     @staticmethod
     def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Optional[Dict[PermissionVariable, Term]]:

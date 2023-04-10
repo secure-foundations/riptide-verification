@@ -1,30 +1,63 @@
+from typing import Dict
+
 import json
+from argparse import ArgumentParser
 
 import smt
 
 from dataflow import DataflowGraph
 from symbolic import SymbolicExecutor
+from permission import MemoryPermissionSolver
 
 
 def main():
-    with open("parallel.o2p") as dataflow_source:
+    parser = ArgumentParser()
+    parser.add_argument("dfg", help="A json file (.o2p) describing the dataflow graph")
+    parser.add_argument("-n", type=int, help="stop when <n> terminating configurations are found")
+    args = parser.parse_args()
+
+    with open(args.dfg) as dataflow_source:
         dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
 
-    executor = SymbolicExecutor(dfg, {
-        r"array1": smt.FreshSymbol(smt.INT),
-        r"array2": smt.FreshSymbol(smt.INT),
-        r"len": smt.Int(3), # smt.FreshSymbol(smt.INT),
-    })
+    free_vars: Dict[str, smt.SMTTerm] = {
+        function_arg.variable_name: smt.FreshSymbol(smt.INT)
+        for function_arg in dfg.function_arguments
+    }
+    print("function argument to SMT variables:", free_vars)
+
+    executor = SymbolicExecutor(dfg, free_vars)
+
+    heap_objects = MemoryPermissionSolver.get_static_heap_objects(dfg)
 
     configs = [executor.configurations[0]]
+    num_terminating_configs = 0
 
     while len(configs):
         config = configs.pop(0)
         next_configs = executor.step(config)
 
         if len(next_configs) == 0:
-            print(config)
-            break
+            num_terminating_configs += 1
+
+            print(f"terminating configuration #{num_terminating_configs}")
+            print(f"  path constraints: {config.path_constraints}")
+            print("  memory updates:")
+            for update in config.memory:
+                print(f"    {update.base}[{update.index}] = {update.value}")
+            
+            solution = MemoryPermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
+            # for constraint in config.permission_constraints:
+            #     print(f"  {constraint}")
+            if solution is None:
+                print("unable to find consistent permission assignment, potential data race")
+                break
+
+            if args.n is not None and num_terminating_configs >= args.n:
+                break
+
+            # for var, term in solution.items():
+            #     print(f"{var} = {term}")
+
         else:
             configs.extend(next_configs)
 

@@ -55,6 +55,30 @@ class Operator:
 class AddOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.Plus(a, b)
+    
+
+@Operator.implement("MUL_CFG_OP_MUL")
+class AddOperator(Operator):
+    def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Times(a, b)
+    
+
+@Operator.implement("ARITH_CFG_OP_SGT")
+class SignedGreaterThanOperator(Operator):
+    def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.GT(a, b), smt.Int(1), smt.Int(0))
+
+
+@Operator.implement("CF_CFG_OP_SELECT")
+class SelectOperator(Operator):
+    def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
+        return Branching(smt.Equals(decider, smt.Int(0)), SelectOperator.false, SelectOperator.true)
+    
+    def true(self, config: SymbolicConfiguration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
+        return a
+
+    def false(self, config: SymbolicConfiguration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
+        return b
 
 
 @Operator.implement("CF_CFG_OP_CARRY")
@@ -64,20 +88,30 @@ class CarryOperator(Operator):
         return a
     
     def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
-        return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.start, CarryOperator.pass_b)
+        if self.pe.pred == "CF_CFG_PRED_FALSE":
+            return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.pass_b, CarryOperator.start)
+        else:
+            return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.start, CarryOperator.pass_b)
     
     def pass_b(self, config: SymbolicConfiguration, b: ChannelId(2)) -> ChannelId(0):
         self.transition_to(CarryOperator.loop)
         return b
 
 
-@Operator.implement("CF_CFG_OP_STEER_TRUE")
-class TrueSteerOperator(Operator):
+@Operator.implement("CF_CFG_OP_STEER")
+class SteerOperator(Operator):
     def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
-        return Branching(smt.Equals(decider, smt.Int(0)), TrueSteerOperator.start, TrueSteerOperator.pass_value)
-    
+        if self.pe.pred == "CF_CFG_PRED_FALSE":
+            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.pass_value, SteerOperator.start)
+        
+        elif self.pe.pred == "CF_CFG_PRED_TRUE":
+            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.start, SteerOperator.pass_value)
+        
+        else:
+            assert False, f"unknown pred {self.pe.pred}"
+
     def pass_value(self, config: SymbolicConfiguration, value: ChannelId(1)) -> ChannelId(0):
-        self.transition_to(TrueSteerOperator.start)
+        self.transition_to(SteerOperator.start)
         return value
 
 
@@ -132,13 +166,27 @@ class StreamOperator(Operator):
         self.current = None
         self.end = None
         self.transition_to(StreamOperator.start)
-        return smt.Int(0)
+
+        if self.pe.pred == "STREAM_CFG_PRED_FALSE":
+            return smt.Int(1)
+        elif self.pe.pred == "STREAM_CFG_PRED_TRUE":
+            return smt.Int(0)
+        else:
+            assert False, f"unknown pred {self.pe.pred}"
     
     def not_end(self, config: SymbolicConfiguration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
         current = self.current
         self.current = smt.Plus(self.current, step)
         self.transition_to(StreamOperator.loop)
-        return current, smt.Int(1)
+
+        if self.pe.pred == "STREAM_CFG_PRED_FALSE":
+            done_flag = smt.Int(0)
+        elif self.pe.pred == "STREAM_CFG_PRED_TRUE":
+            done_flag = smt.Int(1)
+        else:
+            assert False, f"unknown pred {self.pe.pred}"
+
+        return current, done_flag
 
 
 @Operator.implement("MEM_CFG_OP_STORE")
@@ -181,7 +229,7 @@ class LoadOperator(Operator):
     def start_2(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1)) -> ChannelId(0):
         return config.read_memory(base, index)
 
-    def start_3(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), sync: ChannelId(3)) -> ChannelId(0):
+    def start_3(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), sync: ChannelId(2)) -> ChannelId(0):
         return config.read_memory(base, index)
 
 
@@ -391,6 +439,7 @@ class SymbolicExecutor:
             # Check for input channel availability
             for channel_id in input_channel_ids:
                 if not configuration.channel_states[channel_id].ready():
+                    # print(type(operator_state), f"not ready: {input_channel_ids}")
                     break
             else:
                 input_ready = True

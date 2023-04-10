@@ -38,6 +38,7 @@ class ProcessingElement:
     id: int
     name: str
     operator: str
+    pred: Optional[str]
     inputs: Tuple[Channel, ...]
     outputs: Dict[int, Tuple[Channel, ...]]
 
@@ -107,14 +108,11 @@ class DataflowGraph:
             if vertex["type"] == "STREAM_FU_CFG_T":
                 op = "STREAM_FU_CFG_T"
 
-            elif vertex["op"] == "CF_CFG_OP_STEER":
-                op = "CF_CFG_OP_STEER_TRUE" if vertex["pred"] == "CF_CFG_PRED_TRUE" else "CF_CFG_OP_STEER_FALSE"
-
             else:
                 op = vertex["op"]
 
             vertices.append(ProcessingElement(
-                i, vertex["name"], op,
+                i, vertex["name"], op, vertex.get("pred"),
                 tuple(input_channels[i]),
                 { k: tuple(v) for k, v in output_channels.get(i, {}).items() }, # convert lists to tuples
             ))

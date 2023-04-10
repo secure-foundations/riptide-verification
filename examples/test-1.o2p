@@ -1,0 +1,202 @@
+{
+    "function": {
+        "args": [
+            {
+                "name": "%array",
+                "type": "i16*"
+            },
+            {
+                "name": "%len",
+                "type": "i16"
+            }
+        ],
+        "name": "test",
+        "return_type": "void"
+    },
+    "vertices": [
+        {
+            "ID": 0,
+            "inputs": [
+                [
+                    {
+                        "ID": 1,
+                        "hold": false,
+                        "name": "stream15",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ],
+                [
+                    {
+                        "ID": 3,
+                        "hold": false,
+                        "name": "add",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "sum.0",
+            "op": "CF_CFG_OP_CARRY",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 1,
+            "cmp": "STREAM_CFG_CMP_ULT",
+            "inputs": [
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ],
+                [
+                    {
+                        "ID": 6,
+                        "hold": false,
+                        "name": "len",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "1",
+                        "type": "const",
+                        "value": 1
+                    }
+                ]
+            ],
+            "name": "stream15",
+            "pred": "STREAM_CFG_PRED_FALSE",
+            "type": "STREAM_FU_CFG_T",
+            "update": "STREAM_CFG_UPDATE_ADD"
+        },
+        {
+            "ID": 2,
+            "inputs": [
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "sum.0.steer.f",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "65535",
+                        "type": "const",
+                        "value": 65535
+                    }
+                ]
+            ],
+            "name": "conv2",
+            "op": "ARITH_CFG_OP_AND",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 3,
+            "inputs": [
+                [
+                    {
+                        "ID": 2,
+                        "hold": false,
+                        "name": "conv2",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 1,
+                        "hold": false,
+                        "name": "stream15",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "add",
+            "op": "ARITH_CFG_OP_ADD",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 4,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": true,
+                        "name": "array",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 1,
+                        "hold": false,
+                        "name": "stream15",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 3,
+                        "hold": false,
+                        "name": "add",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "store_8",
+            "obj_type": "i16",
+            "op": "MEM_CFG_OP_STORE",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
+            "ID": 5,
+            "inputs": [
+                [
+                    {
+                        "ID": 1,
+                        "hold": false,
+                        "name": "stream15",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 0,
+                        "hold": false,
+                        "name": "sum.0",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "sum.0.steer.f",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        }
+    ]
+}

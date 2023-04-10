@@ -45,6 +45,9 @@ def main():
             for update in config.memory:
                 print(f"    {update.base}[{update.index}] = {update.value}")
             
+            # for i, channel in enumerate(config.channel_states):
+            #     print(f"  channel {i}: {len(channel.values)} value(s)")
+
             solution = MemoryPermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
             # for constraint in config.permission_constraints:
             #     print(f"  {constraint}")

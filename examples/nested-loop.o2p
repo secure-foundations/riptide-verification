@@ -1,0 +1,527 @@
+{
+    "function": {
+        "args": [
+            {
+                "name": "%A",
+                "type": "i32*"
+            },
+            {
+                "name": "%B",
+                "type": "i32*"
+            },
+            {
+                "name": "%m",
+                "type": "i32"
+            },
+            {
+                "name": "%n",
+                "type": "i32"
+            }
+        ],
+        "name": "f",
+        "return_type": "void"
+    },
+    "vertices": [
+        {
+            "ID": 0,
+            "inputs": [
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "stream29",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 17,
+                        "hold": true,
+                        "name": "n",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ]
+            ],
+            "name": "mul",
+            "op": "MUL_CFG_OP_MUL",
+            "type": "MUL_FU_CFG_T"
+        },
+        {
+            "ID": 1,
+            "inputs": [
+                [
+                    {
+                        "ID": 17,
+                        "hold": false,
+                        "name": "n",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ]
+            ],
+            "name": "icmp_1",
+            "op": "ARITH_CFG_OP_SGT",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 2,
+            "inputs": [
+                [
+                    {
+                        "ID": 1,
+                        "hold": false,
+                        "name": "icmp_1",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 17,
+                        "hold": false,
+                        "name": "n",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ]
+            ],
+            "name": "smax",
+            "op": "CF_CFG_OP_SELECT",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 3,
+            "inputs": [
+                [
+                    {
+                        "ID": 18,
+                        "hold": false,
+                        "name": "m",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ]
+            ],
+            "name": "icmp_3",
+            "op": "ARITH_CFG_OP_SGT",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 4,
+            "inputs": [
+                [
+                    {
+                        "ID": 3,
+                        "hold": false,
+                        "name": "icmp_3",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 18,
+                        "hold": false,
+                        "name": "m",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ]
+            ],
+            "name": "smax23",
+            "op": "CF_CFG_OP_SELECT",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 5,
+            "cmp": "STREAM_CFG_CMP_ULT",
+            "inputs": [
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ],
+                [
+                    {
+                        "ID": 4,
+                        "hold": false,
+                        "name": "smax23",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "1",
+                        "type": "const",
+                        "value": 1
+                    }
+                ]
+            ],
+            "name": "stream29",
+            "pred": "STREAM_CFG_PRED_FALSE",
+            "type": "STREAM_FU_CFG_T",
+            "update": "STREAM_CFG_UPDATE_ADD"
+        },
+        {
+            "ID": 6,
+            "inputs": [
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "stream29",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 2,
+                        "hold": false,
+                        "name": "smax",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "smax.invar",
+            "op": "CF_CFG_OP_INVARIANT",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 7,
+            "cmp": "STREAM_CFG_CMP_ULT",
+            "inputs": [
+                [
+                    {
+                        "ID": 11,
+                        "hold": false,
+                        "name": "j.0.const",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 14,
+                        "hold": false,
+                        "name": "smax.invar.steer.f",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "1",
+                        "type": "const",
+                        "value": 1
+                    }
+                ]
+            ],
+            "name": "stream30",
+            "pred": "STREAM_CFG_PRED_FALSE",
+            "type": "STREAM_FU_CFG_T",
+            "update": "STREAM_CFG_UPDATE_ADD"
+        },
+        {
+            "ID": 8,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 15,
+                        "hold": false,
+                        "name": "mul.invar.steer.f",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "add",
+            "op": "ARITH_CFG_OP_ADD",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 9,
+            "inputs": [
+                [
+                    {
+                        "ID": 19,
+                        "hold": true,
+                        "name": "A",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 8,
+                        "hold": false,
+                        "name": "add",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 16,
+                        "hold": false,
+                        "name": "i.0.invar.steer.f",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "store_14",
+            "obj_type": "i32",
+            "op": "MEM_CFG_OP_STORE",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
+            "ID": 10,
+            "inputs": [
+                [
+                    {
+                        "ID": 20,
+                        "hold": true,
+                        "name": "B",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 8,
+                        "hold": false,
+                        "name": "add",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "store_16",
+            "obj_type": "i32",
+            "op": "MEM_CFG_OP_STORE",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
+            "ID": 11,
+            "inputs": [
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "stream29",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ]
+            ],
+            "name": "j.0.const",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 12,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 0,
+                        "hold": false,
+                        "name": "mul",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "mul.invar",
+            "op": "CF_CFG_OP_INVARIANT",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 13,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "stream29",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "i.0.invar",
+            "op": "CF_CFG_OP_INVARIANT",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 14,
+            "inputs": [
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "stream29",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 6,
+                        "hold": false,
+                        "name": "smax.invar",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "smax.invar.steer.f",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 15,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 12,
+                        "hold": false,
+                        "name": "mul.invar",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "mul.invar.steer.f",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 16,
+            "inputs": [
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "stream30",
+                        "oport": 1,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 13,
+                        "hold": false,
+                        "name": "i.0.invar",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "i.0.invar.steer.f",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        }
+    ]
+}

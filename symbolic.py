@@ -54,12 +54,14 @@ class Operator:
 @Operator.implement("ARITH_CFG_OP_ADD")
 class AddOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        # print("plus", a, b)
         return smt.Plus(a, b)
     
 
 @Operator.implement("MUL_CFG_OP_MUL")
 class AddOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        # print("mul", a, b)
         return smt.Times(a, b)
     
 
@@ -90,9 +92,11 @@ class CarryOperator(Operator):
     def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
             return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.pass_b, CarryOperator.start)
-        else:
+        elif self.pe.pred == "CF_CFG_PRED_TRUE":
             return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.start, CarryOperator.pass_b)
-    
+        else:
+            assert False, f"unknown pred {self.pe.pred}"
+
     def pass_b(self, config: SymbolicConfiguration, b: ChannelId(2)) -> ChannelId(0):
         self.transition_to(CarryOperator.loop)
         return b
@@ -102,17 +106,18 @@ class CarryOperator(Operator):
 class SteerOperator(Operator):
     def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
-            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.pass_value, SteerOperator.start)
-        
+            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.pass_value, SteerOperator.discard_value)
         elif self.pe.pred == "CF_CFG_PRED_TRUE":
-            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.start, SteerOperator.pass_value)
-        
+            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.discard_value, SteerOperator.pass_value)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
     def pass_value(self, config: SymbolicConfiguration, value: ChannelId(1)) -> ChannelId(0):
         self.transition_to(SteerOperator.start)
         return value
+    
+    def discard_value(self, config: SymbolicConfiguration, value: ChannelId(1)):
+        self.transition_to(SteerOperator.start)
 
 
 @Operator.implement("CF_CFG_OP_INVARIANT")
@@ -121,7 +126,7 @@ class InvariantOperator(Operator):
         super().__init__(*args)
         self.value: Optional[smt.SMTTerm] = None
 
-    def copy(self) -> StreamOperator:
+    def copy(self) -> InvariantOperator:
         copied = super().copy()
         copied.value = self.value
         return copied
@@ -132,8 +137,13 @@ class InvariantOperator(Operator):
         return value
     
     def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
-        return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.start, InvariantOperator.invariant)
-    
+        if self.pe.pred == "CF_CFG_PRED_FALSE":
+            return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.invariant, InvariantOperator.start)
+        elif self.pe.pred == "CF_CFG_PRED_TRUE":
+            return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.start, InvariantOperator.invariant)
+        else:
+            assert False, f"unknown pred {self.pe.pred}"
+
     def invariant(self, config: SymbolicConfiguration) -> ChannelId(0):
         self.transition_to(InvariantOperator.loop)
         return self.value
@@ -156,16 +166,20 @@ class StreamOperator(Operator):
     def start(self, config: SymbolicConfiguration, first: ChannelId(0), end: ChannelId(1)):
         self.current = first
         self.end = end
+        # print("start", str(self.pe.id), self.current, self.end)
         self.transition_to(StreamOperator.loop)
         return ()
 
     def loop(self, config: SymbolicConfiguration) -> Branching:
-        return Branching(smt.GE(self.current, self.end), StreamOperator.end, StreamOperator.not_end)
+        # print("loop", str(self.pe.id), self.current, self.end)
+        return Branching(smt.GE(self.current, self.end), StreamOperator.done, StreamOperator.not_done)
 
-    def end(self, config: SymbolicConfiguration) -> ChannelId(1):
+    def done(self, config: SymbolicConfiguration) -> ChannelId(1):
         self.current = None
         self.end = None
         self.transition_to(StreamOperator.start)
+
+        # print("end", str(self.pe.id))
 
         if self.pe.pred == "STREAM_CFG_PRED_FALSE":
             return smt.Int(1)
@@ -174,10 +188,12 @@ class StreamOperator(Operator):
         else:
             assert False, f"unknown pred {self.pe.pred}"
     
-    def not_end(self, config: SymbolicConfiguration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
+    def not_done(self, config: SymbolicConfiguration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
         current = self.current
         self.current = smt.Plus(self.current, step)
         self.transition_to(StreamOperator.loop)
+
+        # print("not_end", str(self.pe.id))
 
         if self.pe.pred == "STREAM_CFG_PRED_FALSE":
             done_flag = smt.Int(0)
@@ -427,25 +443,27 @@ class SymbolicExecutor:
         """
 
         changed = False
-        
-        for pe_info, operator_state in \
-            zip(self.graph.vertices, configuration.operator_states):
+    
+        for pe_info in self.graph.vertices:
+            operator_state = configuration.operator_states[pe_info.id]
 
             transition = operator_state.current_transition
             
             input_channel_ids = self.get_transition_input_channels(pe_info, transition)
-            input_ready = False
+            input_ready = True
             
             # Check for input channel availability
+            # print(f"{pe_info.id} {input_channel_ids}")
             for channel_id in input_channel_ids:
                 if not configuration.channel_states[channel_id].ready():
                     # print(type(operator_state), f"not ready: {input_channel_ids}")
+                    input_ready = False
                     break
-            else:
-                input_ready = True
 
             if not input_ready:
                 continue
+
+            # print("triggering", str(pe_info.id))
 
             # TODO: when channels are bounded, check for output channel availability here
 
@@ -460,7 +478,9 @@ class SymbolicExecutor:
                 input_values.append(value.term)
 
             # Run the transition
+            # print(f"original transition {operator_state.current_transition}")
             output_values = transition(operator_state, configuration, *input_values)
+            # print(f"final transition {operator_state.current_transition} {self.get_transition_input_channels(pe_info, operator_state.current_transition)}")
 
             # Process output behaviors
             output_actions = self.get_transition_output_actions(transition)

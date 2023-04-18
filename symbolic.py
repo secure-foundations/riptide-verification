@@ -339,6 +339,7 @@ class SymbolicExecutor:
         self.permission_var_count = 0
         
         initial_permissions: List[permission.PermissionVariable] = []
+        hold_permissions: List[permission.PermissionVariable] = []
 
         # Initialize operator implementations
         operator_impl: List[Operator] = []
@@ -367,6 +368,7 @@ class SymbolicExecutor:
 
                 if channel.hold:
                     state = ChannelState(value)
+                    hold_permissions.append(value.permission)
                 
                 else:
                     state = ChannelState()
@@ -382,6 +384,10 @@ class SymbolicExecutor:
 
         # All initial permissions have to be disjoint
         init_config.permission_constraints.append(permission.Disjoint(tuple(initial_permissions)))
+
+        # Hold permissions should be disjoint from itself (i.e. empty or read)
+        for perm in hold_permissions:
+            init_config.permission_constraints.append(permission.Disjoint((perm, perm)))
 
         self.configurations: List[SymbolicConfiguration] = [init_config]
 

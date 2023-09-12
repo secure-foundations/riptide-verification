@@ -71,6 +71,13 @@ class SignedGreaterThanOperator(Operator):
         return smt.Ite(smt.GT(a, b), smt.Int(1), smt.Int(0))
 
 
+# TODO: fix this
+@Operator.implement("ARITH_CFG_OP_UGT")
+class SignedGreaterThanOperator(Operator):
+    def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.GT(a, b), smt.Int(1), smt.Int(0))
+
+
 @Operator.implement("CF_CFG_OP_SELECT")
 class SelectOperator(Operator):
     def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:

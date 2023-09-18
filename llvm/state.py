@@ -12,5 +12,5 @@ class Configuration:
     previous_block: str
     current_instr_counter: int
 
-    registers: Dict[str, smt.SMTTerm]
+    variables: Dict[str, smt.SMTTerm]
     path_condition: smt.SMTTerm

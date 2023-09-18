@@ -47,6 +47,15 @@ class PointerType(Type):
         return f"{self.base_type}*"
 
 
+@dataclass
+class ArrayType(Type):
+    base_type: Type
+    num_elements: int
+
+    def __str__(self) -> str:
+        return f"[{self.num_elements} x {self.base_type}]"
+
+
 class Value(ASTNode):
     def get_type(self) -> Type:
         raise NotImplementedError()
@@ -90,8 +99,9 @@ class Function(ASTNode):
                 instruction.resolve_uses(self)
 
     def __str__(self) -> str:
+        parameters_string = ", ".join(str(parameter) for parameter in self.parameters.values())
         blocks_string = "\n\n".join(str(block) for block in self.blocks.values())
-        return f"{self.name}:\n{blocks_string}"
+        return f"{self.return_type} {self.name}({parameters_string}) {{\n{blocks_string}\n}}"
 
 
 @dataclass
@@ -238,10 +248,33 @@ class IntegerCompareInstruction(Instruction):
         self.right = self.right.resolve_uses(function)
 
     def get_full_string(self) -> str:
-        return f"{self.name} = icmp {self.cond}, {self.type}, {self.left}, {self.right}"
+        return f"{self.name} = icmp {self.cond} {self.type}, {self.left}, {self.right}"
 
     def __str__(self) -> str:
         return f"i1 {self.name}"
+
+
+@dataclass
+class SelectInstruction(Instruction):
+    name: str
+    cond: Value
+    type: Type
+    left: Value
+    right: Value
+    
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+    
+    def resolve_uses(self, function: Function) -> None:
+        self.cond = self.cond.resolve_uses(function)
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = select {self.cond}, {self.left}, {self.right}"
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
 
 
 @dataclass

@@ -69,6 +69,9 @@ class FunctionParameter(Value):
     type: Type
     name: str
 
+    def get_type(self) -> Type:
+        return self.type
+
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
@@ -103,6 +106,10 @@ class Function(ASTNode):
         blocks_string = "\n\n".join(str(block) for block in self.blocks.values())
         return f"{self.return_type} {self.name}({parameters_string}) {{\n{blocks_string}\n}}"
 
+    def get_block(self, name: str) -> BasicBlock:
+        assert name in self.blocks, f"cannot find block {name}"
+        return self.blocks[name]
+
 
 @dataclass
 class BasicBlock(ASTNode):
@@ -112,6 +119,10 @@ class BasicBlock(ASTNode):
     def __str__(self) -> str:
         instructions_string = "\n    ".join(instruction.get_full_string() for instruction in self.instructions)
         return f"  {self.name}:\n    {instructions_string}"
+
+    def get_nth_instruction(self, n: int) -> Instruction:
+        assert 0 <= n and n < len(self.instructions), f"index {n} out of range"
+        return self.instructions[n]
 
 
 # Values who types cannot be inferred yet
@@ -161,8 +172,11 @@ class Constant(Value):
 
 @dataclass
 class IntegerConstant(Constant):
-    type: Type
+    type: IntegerType
     value: int
+
+    def get_type(self) -> Type:
+        return self.type
 
     def __str__(self) -> str:
         return f"{self.type} {self.value}"
@@ -171,6 +185,9 @@ class IntegerConstant(Constant):
 @dataclass
 class NullConstant(Constant):
     base_type: Type
+
+    def get_type(self) -> Type:
+        return PointerType(self.base_type)
 
     def __str__(self) -> str:
         return f"{self.base_type}* null"

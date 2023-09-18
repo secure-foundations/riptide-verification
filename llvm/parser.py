@@ -89,7 +89,10 @@ class ASTTransformer(Transformer[ASTNode]):
         return PhiInstruction(
             args[0].name,
             args[1],
-            tuple(PhiBranch(branch.value.attach_type(args[1]), branch.label) for branch in args[2:]),
+            OrderedDict(
+                (branch.label, PhiBranch(branch.value.attach_type(args[1]), branch.label))
+                for branch in args[2:]
+            ),
         )
     
     def jump_instruction(self, args: List[Any]) -> JumpInstruction:

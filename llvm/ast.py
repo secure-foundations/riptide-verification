@@ -353,17 +353,17 @@ class StoreInstruction(Instruction):
 class PhiInstruction(Instruction):
     name: str
     type: Type
-    branches: Tuple[PhiBranch, ...]
+    branches: OrderedDict[str, PhiBranch]
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
     
     def resolve_uses(self, function: Function) -> None:
-        for branch in self.branches:
+        for branch in self.branches.values():
             branch.resolve_uses(function)
 
     def get_full_string(self) -> str:
-        branches_string = ", ".join(f"({branch.value}, {branch.label})" for branch in self.branches)
+        branches_string = ", ".join(f"({branch.value}, {branch.label})" for branch in self.branches.values())
         return f"{self.name} = phi {self.type}, {branches_string}"
 
     def __str__(self) -> str:

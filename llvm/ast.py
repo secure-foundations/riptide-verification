@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, Optional
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class ASTNode:
@@ -43,8 +43,21 @@ class FunctionParameter(ASTNode):
 class Function(ASTNode):
     name: str
     return_type: str
-    parameters: Tuple[FunctionParameter, ...]
+
+    parameters: OrderedDict[str, FunctionParameter]
     blocks: OrderedDict[str, BasicBlock]
+    definitions: OrderedDict[str, Instruction] = field(init=False)
+
+    def __post_init__(self):
+        self.definitions = OrderedDict()
+
+        # Find definition for each variable
+        for block in self.blocks.values():
+            for instruction in block.instructions:
+                name = instruction.get_defined_variable()
+                if name is not None:
+                    assert name not in self.definitions, f"redefinition of {name}"
+                    self.definitions[name] = instruction
 
 
 @dataclass
@@ -104,7 +117,8 @@ class NullConstant(Constant):
 
 
 class Instruction(Value):
-    ...
+    def get_defined_variable(self) -> Optional[str]:
+        return None
 
 
 @dataclass
@@ -114,6 +128,9 @@ class AddInstruction(Instruction):
     left: Value
     right: Value
 
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
 
 @dataclass
 class MulInstruction(Instruction):
@@ -121,6 +138,9 @@ class MulInstruction(Instruction):
     type: Type
     left: Value
     right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
 
 
 @dataclass
@@ -131,6 +151,9 @@ class IntegerCompareInstruction(Instruction):
     left: Value
     right: Value
 
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
 
 @dataclass
 class GetElementPointerInstruction(Instruction):
@@ -139,12 +162,18 @@ class GetElementPointerInstruction(Instruction):
     pointer: Value
     indices: Tuple[Value, ...]
 
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
 
 @dataclass
 class LoadInstruction(Instruction):
     name: str
     base_type: Type
     pointer: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
 
 
 @dataclass
@@ -159,6 +188,9 @@ class PhiInstruction(Instruction):
     name: str
     type: Type
     branches: Tuple[PhiBranch, ...]
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
 
 
 @dataclass

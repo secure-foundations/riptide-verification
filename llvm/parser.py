@@ -1,5 +1,6 @@
 from typing import List, Any, Union, Tuple, Optional
 
+from collections import OrderedDict
 from lark import Lark, Transformer, Token, Tree
 from .ast import (
     ASTNode, Module, Function,
@@ -27,7 +28,12 @@ class ASTTransformer(Transformer[ASTNode]):
 
     def function(self, args: List[Any]) -> Function:
         _, return_typ, name_token, parameters, _, blocks = args
-        return Function(name_token.value, return_typ, parameters, blocks)
+        return Function(
+            name_token.value,
+            return_typ,
+            OrderedDict((parameter.name, parameter) for parameter in parameters),
+            OrderedDict((block.name, block) for block in blocks),
+        )
 
     def basic_blocks(self, args: List[BasicBlock]) -> Tuple[BasicBlock, ...]:
         return tuple(args)
@@ -71,7 +77,7 @@ class ASTTransformer(Transformer[ASTNode]):
 
     def phi_instruction(self, args: List[Any]) -> PhiInstruction:
         return PhiInstruction(
-            args[0],
+            args[0].name,
             args[1],
             tuple(PhiBranch(branch.value.attach_type(args[1]), branch.label) for branch in args[2:]),
         )

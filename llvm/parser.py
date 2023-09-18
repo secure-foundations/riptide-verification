@@ -21,10 +21,10 @@ class ASTTransformer(Transformer[ASTNode]):
         return None
 
     def label(self, args: List[Token]) -> str:
-        return args[0].value
+        return args[0].value[1:]
 
     def module(self, args: List[Optional[Function]]) -> Module:
-        return Module(tuple(arg for arg in args if arg is not None))
+        return Module(OrderedDict((arg.name, arg) for arg in args if arg is not None))
 
     def function(self, args: List[Any]) -> Function:
         _, return_typ, name_token, parameters, _, blocks = args
@@ -247,7 +247,10 @@ class Parser:
     @staticmethod
     def parse_module(src: str) -> Module:
         raw_ast = Parser.MODULE_PARSER.parse(src)
-        return ASTTransformer().transform(raw_ast)
+        ast = ASTTransformer().transform(raw_ast)
+        ast.resolve_uses()
+        return ast
+        
 
 
 if __name__ == "__main__":

@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 
 import inspect
 
-import smt
-import permission
+import semantics.smt as smt
 
-from dataflow import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
+from . import permission
+from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
 
 
 TransitionFunction = Callable[..., Any]

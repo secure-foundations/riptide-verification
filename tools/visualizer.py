@@ -3,7 +3,7 @@ from typing import Callable, List
 import json
 from argparse import ArgumentParser
 
-from dataflow import DataflowGraph, FunctionArgument, ConstantValue
+from semantics.dataflow.graph import DataflowGraph, FunctionArgument, ConstantValue
 
 
 _BINARY_ARITH_PORT_POSITIONS = {

@@ -4,9 +4,9 @@ from __future__ import annotations
 from typing import Set, Tuple, Iterable, List, Dict, Mapping, Optional
 from dataclasses import dataclass
 
-from dataflow import DataflowGraph, FunctionArgument, Channel, ProcessingElement
+from .graph import DataflowGraph, FunctionArgument
 
-import smt
+import semantics.smt as smt
 
 
 class Term:

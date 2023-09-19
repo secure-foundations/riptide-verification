@@ -3,11 +3,11 @@ from typing import Dict
 import json
 from argparse import ArgumentParser
 
-import smt
+import semantics.smt as smt
 
-from dataflow import DataflowGraph
-from symbolic import SymbolicExecutor
-from permission import MemoryPermissionSolver
+from semantics.dataflow.graph import DataflowGraph
+from semantics.dataflow.semantics import SymbolicExecutor
+from semantics.dataflow.permission import MemoryPermissionSolver
 
 
 def main():

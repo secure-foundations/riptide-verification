@@ -2,17 +2,7 @@ from typing import List, Any, Union, Tuple, Optional
 
 from collections import OrderedDict
 from lark import Lark, Transformer, Token, Tree
-from .ast import (
-    ASTNode, Module, Function,
-    BasicBlock,
-    Type, VoidType, IntegerType, PointerType, ArrayType, FunctionParameter,
-    UnresolvedValue, UnresolvedIntegerValue, UnresolvedNullValue, UnresolvedVariable,
-    Value,
-    Instruction, AddInstruction, MulInstruction, IntegerCompareInstruction, SelectInstruction,
-    GetElementPointerInstruction, LoadInstruction, StoreInstruction,
-    PhiInstruction, PhiBranch,
-    JumpInstruction, BranchInstruction, ReturnInstruction,
-)
+from .ast import *
 
 
 class ASTTransformer(Transformer[ASTNode]):

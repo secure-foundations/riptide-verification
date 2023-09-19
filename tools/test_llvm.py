@@ -1,5 +1,5 @@
-from .parser import Parser
-from .state import Configuration, NextConfiguration, FunctionReturn
+from semantics.llvm.parser import Parser
+from semantics.llvm.semantics import Configuration, NextConfiguration, FunctionReturn
 
 if __name__ == "__main__":
     module = Parser.parse_module(r"""

@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Tuple, List, Dict
 from dataclasses import dataclass
 
-import smt
+import semantics.smt as smt
 from .ast import *
 
 
@@ -158,7 +158,7 @@ class Configuration:
 
         Returns a non-empty tuple of symbolic branches
 
-        The original configuration MIGHT be modified after the step function
+        The original configuration might be modified after the step function
         so do not use it after step is called.
         """
 

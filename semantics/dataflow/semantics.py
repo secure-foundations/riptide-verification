@@ -11,7 +11,7 @@ from . import permission
 from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
 
 
-WORD_WIDTH = 32
+WORD_WIDTH = 64
 
 
 TransitionFunction = Callable[..., Any]

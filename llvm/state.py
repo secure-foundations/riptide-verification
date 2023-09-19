@@ -18,7 +18,7 @@ class NextConfiguration(StepResult):
 @dataclass
 class FunctionReturn(StepResult):
     final_config: Configuration
-    value: smt.SMTTerm
+    value: Optional[smt.SMTTerm]
 
 
 @dataclass
@@ -84,7 +84,7 @@ class Configuration:
         return self.function.get_block(self.current_block).get_nth_instruction(self.current_instr_counter)
 
     def set_variable(self, name: str, value: smt.SMTTerm) -> None:
-        self.variables[name] = value
+        self.variables[name] = value.simplify()
 
     def get_variable(self, name: str) -> smt.SMTTerm:
         assert name in self.variables, f"variable {name} not defined"
@@ -111,8 +111,46 @@ class Configuration:
             # true for sat (i.e. feasible), false for unsat
             return solver.solve()
 
-    def store_memory(self, key: smt.SMTTerm, value: smt.SMTTerm) -> None:
-        self.memory = smt.Store(self.memory, key, value)
+    def store_memory(self, location: smt.SMTTerm, value: smt.SMTTerm, bit_width: int) -> None:
+        """
+        Store value (of bit width bit_width) into the memory starting at `location`
+        Location should be a BV of width 64
+        """
+
+        # Align bit_width to 8
+        aligned_bit_width = (bit_width + 7) // 8 * 8
+        increase = aligned_bit_width - bit_width
+
+        extended_value = smt.BVZExt(value, increase)
+
+        for i in range(aligned_bit_width // 8):
+            # store the ith byte to dest + i
+            self.memory = smt.Store(
+                self.memory,
+                smt.BVAdd(location, smt.BV(i, 64)),
+                smt.BVExtract(extended_value, i * 8, i * 8 + 7),
+            )
+        
+        self.memory = self.memory.simplify()
+    
+    def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:
+        """
+        Load a BV of width bit_width starting from the `location`
+        """
+
+        assert bit_width > 0
+
+        aligned_bit_width = (bit_width + 7) // 8 * 8
+        increase = aligned_bit_width - bit_width
+
+        read_bytes = (
+            smt.Select(self.memory, smt.BVAdd(location, smt.BV(i, 64)))
+            for i in range(aligned_bit_width // 8)
+        )
+        
+        value = smt.BVConcat(*read_bytes)
+
+        return smt.BVExtract(value, 0, bit_width - 1).simplify()
 
     def step(self) -> Tuple[StepResult, ...]:
         """
@@ -144,43 +182,65 @@ class Configuration:
     
         elif isinstance(instr, IntegerCompareInstruction):
             if instr.cond == "eq":
-                self.set_variable(instr.name, smt.Ite(
-                    smt.Equals(
-                        self.eval_value(instr.left),
-                        self.eval_value(instr.right),
-                    ),
-                    smt.BV(1, 1),
-                    smt.BV(0, 1),
-                ))
-                self.current_instr_counter += 1
-                return NextConfiguration(self),
+                result = smt.Equals(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
             
-            else:
-                assert False, f"icmp condition {instr.cond} not implemented"
-    
-        elif isinstance(instr, StoreInstruction):
-            bit_width = instr.base_type.get_bit_width()
-            
-            # Align bit_width to 8
-            aligned_bit_width = (bit_width + 7) // 8 * 8
-            increase = aligned_bit_width - bit_width
-
-            extended_value = smt.BVZExt(self.eval_value(instr.value), increase)
-            dest_pointer = self.eval_value(instr.dest)
-
-            for i in range(aligned_bit_width // 8):
-                # store the ith byte to dest + i
-                self.store_memory(
-                    smt.BVAdd(dest_pointer, smt.BV(i, 64)),
-                    smt.BVExtract(extended_value, i * 8, i * 8 + 7),
+            elif instr.cond == "sgt":
+                result = smt.BVSGE(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
                 )
 
+            else:
+                assert False, f"icmp condition {instr.cond} not implemented"
+
+            self.set_variable(instr.name, smt.Ite(result, smt.BV(1, 1), smt.BV(0, 1)))
+            self.current_instr_counter += 1
+            return NextConfiguration(self),
+    
+        elif isinstance(instr, LoadInstruction):
+            bit_width = instr.base_type.get_bit_width()
+            self.set_variable(
+                instr.name,
+                self.load_memory(self.eval_value(instr.pointer), bit_width),
+            )
+            self.current_instr_counter += 1
             return NextConfiguration(self),
 
+        elif isinstance(instr, StoreInstruction):
+            bit_width = instr.base_type.get_bit_width()
+            self.store_memory(self.eval_value(instr.dest), self.eval_value(instr.value), bit_width)
+            self.current_instr_counter += 1
+            return NextConfiguration(self),
+    
+        elif isinstance(instr, SelectInstruction):
+            cond = smt.Equals(self.eval_value(instr.cond), smt.BV(0, 1))
+
+            self.current_instr_counter += 1
+            other = self.copy()
+            self.path_conditions.append(smt.Not(cond).simplify())
+            other.path_conditions.append(cond.simplify())
+
+            self.set_variable(instr.name, self.eval_value(instr.left))
+            other.set_variable(instr.name, self.eval_value(instr.right))
+
+            if not self.check_feasibility():
+                # other.path_conditions implies cond
+                other.path_conditions.pop()
+                return NextConfiguration(other),
+
+            if not other.check_feasibility():
+                self.path_conditions.pop()
+                return NextConfiguration(self),
+            
+            return NextConfiguration(self), NextConfiguration(other)
+
         elif isinstance(instr, PhiInstruction):
-            assert self.current_block in instr.branches, \
+            assert self.previous_block in instr.branches, \
                    f"block label {self.current_block} not in the list of phi branches"
-            self.set_variable(instr.name, self.eval_value(instr.branches[self.current_block].value))
+            self.set_variable(instr.name, self.eval_value(instr.branches[self.previous_block].value))
             self.current_instr_counter += 1
             return NextConfiguration(self),
     
@@ -191,8 +251,9 @@ class Configuration:
             return NextConfiguration(self),
 
         elif isinstance(instr, BranchInstruction):
-            # Would always be at the end of a block
             cond = smt.Equals(self.eval_value(instr.cond), smt.BV(0, 1))
+
+            # Br is always at the end of a block
             self.current_instr_counter = 0
 
             self.previous_block = self.current_block
@@ -201,16 +262,27 @@ class Configuration:
             self.current_block = instr.true_label
             other.current_block = instr.false_label
             
-            self.path_conditions.append(smt.Not(cond))
-            other.path_conditions.append(cond)
+            self.path_conditions.append(smt.Not(cond).simplify())
+            other.path_conditions.append(cond.simplify())
 
             if not self.check_feasibility():
+                # other.path_conditions implies cond
+                other.path_conditions.pop()
                 return NextConfiguration(other),
 
             if not other.check_feasibility():
+                self.path_conditions.pop()
                 return NextConfiguration(self),
             
             return NextConfiguration(self), NextConfiguration(other)
+
+        elif isinstance(instr, ReturnInstruction):
+            if instr.value is not None:
+                return_value = self.eval_value(instr.value)
+            else:
+                return_value = None
+
+            return FunctionReturn(self, return_value),
 
         else:
             assert False, f"{instr.get_full_string()} not implemented"

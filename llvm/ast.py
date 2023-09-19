@@ -22,7 +22,8 @@ class Module(ASTNode):
 
 
 class Type(ASTNode):
-    ...
+    def get_bit_width(self) -> int:
+        raise NotImplementedError()
 
 
 @dataclass
@@ -38,6 +39,9 @@ class IntegerType(Type):
     def __str__(self) -> str:
         return f"i{self.bit_width}"
 
+    def get_bit_width(self) -> int:
+        return self.bit_width
+
 
 @dataclass
 class PointerType(Type):
@@ -45,6 +49,9 @@ class PointerType(Type):
 
     def __str__(self) -> str:
         return f"{self.base_type}*"
+
+    def get_bit_width(self) -> int:
+        return 64
 
 
 @dataclass

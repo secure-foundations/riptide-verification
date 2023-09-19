@@ -11,7 +11,7 @@ from pysmt.shortcuts import ( # type: ignore
     Array, Select,
     get_free_variables,
     Plus, Store, Times,
-    BVAdd, BVMul,
+    BVAdd, BVMul, BVZExt, BVExtract,
 )
 from pysmt.typing import BOOL, INT, STRING, BVType, FunctionType, ArrayType, Type # type: ignore
 from pysmt.smtlib.parser import SmtLibParser # type: ignore

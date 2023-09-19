@@ -11,6 +11,9 @@ from . import permission
 from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
 
 
+WORD_WIDTH = 32
+
+
 TransitionFunction = Callable[..., Any]
 
 
@@ -55,33 +58,33 @@ class Operator:
 class AddOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         # print("plus", a, b)
-        return smt.Plus(a, b)
+        return smt.BVAdd(a, b)
     
 
 @Operator.implement("MUL_CFG_OP_MUL")
 class AddOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         # print("mul", a, b)
-        return smt.Times(a, b)
+        return smt.BVMul(a, b)
     
 
 @Operator.implement("ARITH_CFG_OP_SGT")
 class SignedGreaterThanOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
-        return smt.Ite(smt.GT(a, b), smt.Int(1), smt.Int(0))
+        return smt.Ite(smt.BVSGT(a, b), smt.BV(1, WORD_WIDTH), smt.BV(0, WORD_WIDTH))
 
 
 # TODO: fix this
 @Operator.implement("ARITH_CFG_OP_UGT")
 class SignedGreaterThanOperator(Operator):
     def start(self, config: SymbolicConfiguration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
-        return smt.Ite(smt.GT(a, b), smt.Int(1), smt.Int(0))
+        return smt.Ite(smt.BVUGT(a, b), smt.BV(1, WORD_WIDTH), smt.BV(0, WORD_WIDTH))
 
 
 @Operator.implement("CF_CFG_OP_SELECT")
 class SelectOperator(Operator):
     def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
-        return Branching(smt.Equals(decider, smt.Int(0)), SelectOperator.false, SelectOperator.true)
+        return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), SelectOperator.false, SelectOperator.true)
     
     def true(self, config: SymbolicConfiguration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
         return a
@@ -98,9 +101,9 @@ class CarryOperator(Operator):
     
     def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
-            return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.pass_b, CarryOperator.start)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), CarryOperator.pass_b, CarryOperator.start)
         elif self.pe.pred == "CF_CFG_PRED_TRUE":
-            return Branching(smt.Equals(decider, smt.Int(0)), CarryOperator.start, CarryOperator.pass_b)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), CarryOperator.start, CarryOperator.pass_b)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
@@ -113,9 +116,9 @@ class CarryOperator(Operator):
 class SteerOperator(Operator):
     def start(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
-            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.pass_value, SteerOperator.discard_value)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), SteerOperator.pass_value, SteerOperator.discard_value)
         elif self.pe.pred == "CF_CFG_PRED_TRUE":
-            return Branching(smt.Equals(decider, smt.Int(0)), SteerOperator.discard_value, SteerOperator.pass_value)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), SteerOperator.discard_value, SteerOperator.pass_value)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
@@ -145,9 +148,9 @@ class InvariantOperator(Operator):
     
     def loop(self, config: SymbolicConfiguration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
-            return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.invariant, InvariantOperator.start)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), InvariantOperator.invariant, InvariantOperator.start)
         elif self.pe.pred == "CF_CFG_PRED_TRUE":
-            return Branching(smt.Equals(decider, smt.Int(0)), InvariantOperator.start, InvariantOperator.invariant)
+            return Branching(smt.Equals(decider, smt.BV(0, WORD_WIDTH)), InvariantOperator.start, InvariantOperator.invariant)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
@@ -179,7 +182,7 @@ class StreamOperator(Operator):
 
     def loop(self, config: SymbolicConfiguration) -> Branching:
         # print("loop", str(self.pe.id), self.current, self.end)
-        return Branching(smt.GE(self.current, self.end), StreamOperator.done, StreamOperator.not_done)
+        return Branching(smt.BVSGE(self.current, self.end), StreamOperator.done, StreamOperator.not_done)
 
     def done(self, config: SymbolicConfiguration) -> ChannelId(1):
         self.current = None
@@ -189,23 +192,23 @@ class StreamOperator(Operator):
         # print("end", str(self.pe.id))
 
         if self.pe.pred == "STREAM_CFG_PRED_FALSE":
-            return smt.Int(1)
+            return smt.BV(1, WORD_WIDTH)
         elif self.pe.pred == "STREAM_CFG_PRED_TRUE":
-            return smt.Int(0)
+            return smt.BV(0, WORD_WIDTH)
         else:
             assert False, f"unknown pred {self.pe.pred}"
     
     def not_done(self, config: SymbolicConfiguration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
         current = self.current
-        self.current = smt.Plus(self.current, step)
+        self.current = smt.BVAdd(self.current, step)
         self.transition_to(StreamOperator.loop)
 
         # print("not_end", str(self.pe.id))
 
         if self.pe.pred == "STREAM_CFG_PRED_FALSE":
-            done_flag = smt.Int(0)
+            done_flag = smt.BV(0, WORD_WIDTH)
         elif self.pe.pred == "STREAM_CFG_PRED_TRUE":
-            done_flag = smt.Int(1)
+            done_flag = smt.BV(1, WORD_WIDTH)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
@@ -228,11 +231,11 @@ class StoreOperator(Operator):
 
     def start_3(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), value: ChannelId(2)) -> ChannelId(0):
         config.write_memory(base, index, value)
-        return smt.Int(1)
+        return smt.BV(1, WORD_WIDTH)
 
     def start_4(self, config: SymbolicConfiguration, base: ChannelId(0), index: ChannelId(1), value: ChannelId(2), sync: ChannelId(3)) -> ChannelId(0):
         config.write_memory(base, index, value)
-        return smt.Int(1)
+        return smt.BV(1, WORD_WIDTH)
     
 
 @Operator.implement("MEM_CFG_OP_LOAD")
@@ -311,7 +314,7 @@ class SymbolicConfiguration:
 
     @staticmethod
     def get_fresh_memory_var() -> smt.SMTTerm:
-        return smt.FreshSymbol(smt.ArrayType(smt.INT, smt.ArrayType(smt.INT, smt.INT)))
+        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH))))
 
     def copy(self) -> SymbolicConfiguration:
         return SymbolicConfiguration(
@@ -363,7 +366,7 @@ class SymbolicExecutor:
         for channel in graph.channels:
             if channel.constant is not None:
                 if isinstance(channel.constant, ConstantValue):
-                    value = self.get_fresh_permissioned_value(smt.Int(channel.constant.value))
+                    value = self.get_fresh_permissioned_value(smt.BV(channel.constant.value, WORD_WIDTH))
                 
                 else:
                     assert isinstance(channel.constant, FunctionArgument)

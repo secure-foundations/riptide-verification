@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
-from semantics.dataflow.semantics import SymbolicExecutor
+from semantics.dataflow.semantics import SymbolicExecutor, WORD_WIDTH
 from semantics.dataflow.permission import MemoryPermissionSolver
 
 
@@ -27,11 +27,11 @@ def main():
         assert assignment.count("=") == 1, f"ill-formed assignment {assignment}"
         name, value = assignment.split("=")
         assert name in function_arg_names, f"argument {name} does not exist"
-        free_vars[name] = smt.Int(int(value))
+        free_vars[name] = smt.BV(int(value), WORD_WIDTH)
 
     for function_arg in dfg.function_arguments:
         if function_arg.variable_name not in free_vars:
-            free_vars[function_arg.variable_name] = smt.FreshSymbol(smt.INT)
+            free_vars[function_arg.variable_name] = smt.FreshSymbol(smt.BVType(WORD_WIDTH))
 
     print("function argument to SMT variables:", free_vars)
 

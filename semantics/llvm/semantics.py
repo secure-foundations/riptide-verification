@@ -40,7 +40,7 @@ class Configuration:
 
     # Fresh array variable
     memory: smt.SMTTerm = field(
-        default_factory=lambda: smt.FreshSymbol(smt.ArrayType(smt.BVType(64), smt.BVType(8))),
+        default_factory=lambda: smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(8))),
     )
 
     def __str__(self) -> str:
@@ -78,6 +78,7 @@ class Configuration:
             self.current_instr_counter,
             dict(self.variables),
             list(self.path_conditions),
+            self.memory,
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -114,7 +115,7 @@ class Configuration:
     def store_memory(self, location: smt.SMTTerm, value: smt.SMTTerm, bit_width: int) -> None:
         """
         Store value (of bit width bit_width) into the memory starting at `location`
-        Location should be a BV of width 64
+        Location should be a BV of width WORD_WIDTH
         """
 
         # Align bit_width to 8
@@ -127,7 +128,7 @@ class Configuration:
             # store the ith byte to dest + i
             self.memory = smt.Store(
                 self.memory,
-                smt.BVAdd(location, smt.BV(i, 64)),
+                smt.BVAdd(location, smt.BV(i, WORD_WIDTH)),
                 smt.BVExtract(extended_value, i * 8, i * 8 + 7),
             )
         
@@ -144,7 +145,7 @@ class Configuration:
         increase = aligned_bit_width - bit_width
 
         read_bytes = (
-            smt.Select(self.memory, smt.BVAdd(location, smt.BV(i, 64)))
+            smt.Select(self.memory, smt.BVAdd(location, smt.BV(i, WORD_WIDTH)))
             for i in range(aligned_bit_width // 8)
         )
         
@@ -198,6 +199,35 @@ class Configuration:
 
             self.set_variable(instr.name, smt.Ite(result, smt.BV(1, 1), smt.BV(0, 1)))
             self.current_instr_counter += 1
+            return NextConfiguration(self),
+    
+        elif isinstance(instr, GetElementPointerInstruction):
+            pointer = self.eval_value(instr.pointer)
+
+            assert len(instr.indices) == 1, "unsupported"
+            index = instr.indices[0]
+
+            element_bit_width = instr.base_type.get_bit_width()
+            aligned_element_byte_count = (element_bit_width + 7) // 8
+
+            index_value = self.eval_value(index)
+            index_bit_width = index.get_type().get_bit_width()
+
+            assert index_bit_width <= WORD_WIDTH
+            if index_bit_width < WORD_WIDTH:
+                index_value = smt.BVSExt(index_value, WORD_WIDTH - index_bit_width)
+
+            pointer = smt.BVAdd(
+                pointer,
+                smt.BVMul(
+                    smt.BV(aligned_element_byte_count, WORD_WIDTH),
+                    index_value,
+                ),
+            )
+
+            self.set_variable(instr.name, pointer)
+            self.current_instr_counter += 1
+
             return NextConfiguration(self),
     
         elif isinstance(instr, LoadInstruction):

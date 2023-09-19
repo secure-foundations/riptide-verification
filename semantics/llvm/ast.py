@@ -5,6 +5,9 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 
+WORD_WIDTH = 64
+
+
 class ASTNode:
     ...
 
@@ -51,7 +54,7 @@ class PointerType(Type):
         return f"{self.base_type}*"
 
     def get_bit_width(self) -> int:
-        return 64
+        return WORD_WIDTH
 
 
 @dataclass
@@ -231,6 +234,9 @@ class AddInstruction(Instruction):
     def get_full_string(self) -> str:
         return f"{self.name} = add {self.type}, {self.left}, {self.right}"
 
+    def get_type(self) -> Type:
+        return self.type
+
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
@@ -251,6 +257,9 @@ class MulInstruction(Instruction):
 
     def get_full_string(self) -> str:
         return f"{self.name} = mul {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
@@ -273,6 +282,9 @@ class IntegerCompareInstruction(Instruction):
 
     def get_full_string(self) -> str:
         return f"{self.name} = icmp {self.cond} {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return IntegerType(1)
 
     def __str__(self) -> str:
         return f"i1 {self.name}"
@@ -297,6 +309,9 @@ class SelectInstruction(Instruction):
     def get_full_string(self) -> str:
         return f"{self.name} = select {self.cond}, {self.left}, {self.right}"
 
+    def get_type(self) -> Type:
+        return self.type
+
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
 
@@ -319,8 +334,12 @@ class GetElementPointerInstruction(Instruction):
         indices_string = ", ".join(str(index) for index in self.indices)
         return f"{self.name} = getelementptr {self.base_type}, {self.pointer}, {indices_string}"
 
+    def get_type(self) -> Type:
+        assert len(self.indices) == 1, "unsupported"
+        return PointerType(self.base_type)
+
     def __str__(self) -> str:
-        return f"<infer> {self.name}"
+        return f"{self.get_type()} {self.name}"
 
 
 @dataclass
@@ -337,6 +356,9 @@ class LoadInstruction(Instruction):
 
     def get_full_string(self) -> str:
         return f"{self.name} = load {self.base_type}, {self.pointer}"
+
+    def get_type(self) -> Type:
+        return self.base_type
 
     def __str__(self) -> str:
         return f"{self.base_type} {self.name}"
@@ -372,6 +394,9 @@ class PhiInstruction(Instruction):
     def get_full_string(self) -> str:
         branches_string = ", ".join(f"({branch.value}, {branch.label})" for branch in self.branches.values())
         return f"{self.name} = phi {self.type}, {branches_string}"
+
+    def get_type(self) -> Type:
+        return self.type
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"

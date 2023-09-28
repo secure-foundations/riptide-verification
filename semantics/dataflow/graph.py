@@ -41,6 +41,7 @@ class ProcessingElement:
     pred: Optional[str]
     inputs: Tuple[Channel, ...]
     outputs: Dict[int, Tuple[Channel, ...]]
+    llvm_position: Optional[Tuple[str, int]]
 
 
 @dataclass
@@ -107,14 +108,17 @@ class DataflowGraph:
         for i, vertex in enumerate(obj["vertices"]):
             if vertex["type"] == "STREAM_FU_CFG_T":
                 op = "STREAM_FU_CFG_T"
-
             else:
                 op = vertex["op"]
+
+            position = ((vertex["llvm_block"], vertex["llvm_index"])
+                        if "llvm_block" in vertex and "llvm_index" in vertex else None)
 
             vertices.append(ProcessingElement(
                 i, vertex["name"], op, vertex.get("pred"),
                 tuple(input_channels[i]),
                 { k: tuple(v) for k, v in output_channels.get(i, {}).items() }, # convert lists to tuples
+                position,
             ))
 
         return DataflowGraph(tuple(vertices), tuple(channels), tuple(function_arguments))

@@ -236,7 +236,7 @@ class StoreOperator(Operator):
     def start_4(self, config: Configuration, base: ChannelId(0), index: ChannelId(1), value: ChannelId(2), sync: ChannelId(3)) -> ChannelId(0):
         config.write_memory(base, index, value)
         return smt.BV(1, WORD_WIDTH)
-    
+
 
 @Operator.implement("MEM_CFG_OP_LOAD")
 class LoadOperator(Operator):

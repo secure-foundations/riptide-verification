@@ -1,6 +1,7 @@
 from typing import Callable, List
 
 import json
+import html
 from argparse import ArgumentParser
 
 from semantics.dataflow.graph import DataflowGraph, FunctionArgument, ConstantValue
@@ -21,96 +22,118 @@ _DOT_CIRCLE_ATTR = "shape=circle fixedsize=true height=0.6 width=0.6"
 _DOT_SQUARE_ATTRS = "shape=square fixedsize=true height=0.5 width=0.5"
 _DOT_TRIANGLE_ATTRS = "shape=triangle fixedsize=true height=0.6 width=0.513"
 
-
 OPERATOR_INFO = {
     "MISC_CFG_OP_NOP": {
-        "dot_attr": f"label=\"nop\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "nop",
+        "dot_attr": _DOT_CIRCLE_ATTR,
     },
     "ARITH_CFG_OP_ADD": {
-        "dot_attr": f"label=\"+\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "+",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_GEP2": {
-        "dot_attr": f"label=\"+?\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "+?",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_GEP4": {
-        "dot_attr": f"label=\"+?\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "+?",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_SUB": {
-        "dot_attr": f"label=\"-\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "-",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "MUL_CFG_OP_MUL": {
-        "dot_attr": f"label=\"x\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "x",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "MUL_CFG_OP_CLIP": {
-        "dot_attr": f"label=\"Clip\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "Clip",
+        "dot_attr": _DOT_CIRCLE_ATTR,
     },
     "ARITH_CFG_OP_SHL": {
-        "dot_attr": f"label=\"<<\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "<<",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_ASHR": {
-        "dot_attr": f"label=\">>\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": ">>",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_AND": {
-        "dot_attr": f"label=\"&\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "&",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_OR": {
-       "dot_attr": f"label=\"|\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "|",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_XOR": {
-        "dot_attr": f"label=\"^\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "^",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_EQ": {
-        "dot_attr": f"label=\"==\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "==",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_NE": {
-        "dot_attr": f"label=\"!=\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "!=",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_UGT": {
-        "dot_attr": f"label=\">\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": ">",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_UGE": {
-        "dot_attr": f"label=\">=\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": ">=",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_ULT": {
-        "dot_attr": f"label=\"<\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "<",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_ULE": {
-        "dot_attr": f"label=\"<=\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "<=",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_SGT": {
-        "dot_attr": f"label=\">\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": ">",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_SGE": {
-        "dot_attr": f"label=\">=\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": ">=",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_SLT": {
-        "dot_attr": f"label=\"<\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "<",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "ARITH_CFG_OP_SLE": {
-        "dot_attr": f"label=\"<=\" {_DOT_CIRCLE_ATTR}",
+        "dot_label": "<=",
+        "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
     "MEM_CFG_OP_LOAD": {
-        "dot_attr": f"label=\"LD\" {_DOT_CIRCLE_ATTR} style=filled fillcolor=aquamarine2",
+        "dot_label": "LD",
+        "dot_attr": f"{_DOT_CIRCLE_ATTR} style=filled fillcolor=aquamarine2",
         "dot_input_port_positions": {
             0: "nw",
             1: "n",
@@ -121,7 +144,8 @@ OPERATOR_INFO = {
         },
     },
     "MEM_CFG_OP_STORE": {
-        "dot_attr": f"label=\"ST\" {_DOT_CIRCLE_ATTR} style=filled fillcolor=aquamarine2",
+        "dot_label": "ST",
+        "dot_attr": f"{_DOT_CIRCLE_ATTR} style=filled fillcolor=aquamarine2",
         "dot_input_port_positions": {
             0: "nw",
             1: "n",
@@ -133,7 +157,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_SELECT": {
-        "dot_attr": f"label=\"Sel\" {_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": "Sel",
+        "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -143,7 +168,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_INVARIANT": {
-        "dot_attr": lambda pe: f"label=<Inv<SUB>{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</SUB>> {_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": lambda pe: f"<Inv<SUB><FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT></SUB>>",
+        "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -153,7 +179,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_CARRY": {
-        "dot_attr": lambda pe: f"label=<C<SUB>{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</SUB>> {_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": lambda pe: f"<C<SUB><FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT></SUB>>",
+        "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -164,7 +191,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_MERGE": {
-        "dot_attr": f"label=\"M\" {_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": "M",
+        "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -175,7 +203,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_ORDER": {
-        "dot_attr": f"label=\"O\" {_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": "O",
+        "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -186,7 +215,8 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_STEER": {
-        "dot_attr": lambda pe: f"label=\"{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}\" {_DOT_TRIANGLE_ATTRS} style=filled fillcolor=grey",
+        "dot_label": lambda pe: "T" if pe.pred == 'CF_CFG_PRED_TRUE' else "F",
+        "dot_attr": f"{_DOT_TRIANGLE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
             1: "n",
@@ -196,7 +226,8 @@ OPERATOR_INFO = {
         },
     },
     "STREAM_FU_CFG_T": {
-        "dot_attr": lambda pe: f"label=<Str<SUB>{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}</SUB>> {_DOT_CIRCLE_ATTR} style=filled fillcolor=cadetblue1",
+        "dot_label": lambda pe: f"<Str<SUB>{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}</SUB>>",
+        "dot_attr": f"{_DOT_CIRCLE_ATTR} style=filled fillcolor=cadetblue1",
         "dot_input_port_positions": {
             0: "nw",
             1: "n",
@@ -212,7 +243,7 @@ OPERATOR_INFO = {
 
 class DataflowVisualizer:
     @staticmethod
-    def generate_dot_description(graph: DataflowGraph, channel_label: Callable[[int], str] = str) -> str:
+    def generate_dot_description(graph: DataflowGraph, channel_label: Callable[[int], str] = str, llvm_annotation: bool = True) -> str:
         """
         Generate a visualization of the graph in dot format
         """
@@ -221,10 +252,20 @@ class DataflowVisualizer:
         constant_count = 0
 
         for pe in graph.vertices:
-            attr = OPERATOR_INFO[pe.operator]['dot_attr']
-            if callable(attr):
-                attr = attr(pe)
-            elements.append(f"v{pe.id} [{attr}]")
+            label = OPERATOR_INFO[pe.operator]["dot_label"]
+            attr = OPERATOR_INFO[pe.operator]["dot_attr"]
+            if callable(label):
+                label = label(pe)
+
+            if label.startswith("<") and label.endswith(">"):
+                label = label[1:-1]
+            else:
+                label = html.escape(label)
+            
+            if pe.llvm_position is not None and llvm_annotation:
+                label += f"<BR/><FONT point-size=\"5\">{pe.llvm_position[0]}:{pe.llvm_position[1]}</FONT>"
+
+            elements.append(f"v{pe.id} [label=<{label}> {attr}]")
 
         for channel in graph.channels:
             if channel.constant is None:
@@ -289,11 +330,17 @@ digraph {
 def _main():
     parser = ArgumentParser()
     parser.add_argument("o2p", help="Input dataflow graph")
+    parser.add_argument("--no-channel-id", default=False, action="store_const", const=True)
+    parser.add_argument("--no-llvm-annotation", default=False, action="store_const", const=True)
     args = parser.parse_args()
 
     with open(args.o2p) as dataflow_file:
         dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_file))
-        print(DataflowVisualizer.generate_dot_description(dfg))
+        print(DataflowVisualizer.generate_dot_description(
+            dfg,
+            (lambda _: "") if args.no_channel_id else str,
+            not args.no_llvm_annotation,
+        ))
 
 
 if __name__ == "__main__":

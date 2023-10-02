@@ -54,6 +54,12 @@ class Operator:
         return type(self)(self.pe, self.internal_permission, self.current_transition)
 
 
+@Operator.implement("ARITH_CFG_OP_EQ")
+class EqOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.Equals(a, b), smt.BV(1, WORD_WIDTH), smt.BV(0, WORD_WIDTH))
+
+
 @Operator.implement("ARITH_CFG_OP_ADD")
 class AddOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):

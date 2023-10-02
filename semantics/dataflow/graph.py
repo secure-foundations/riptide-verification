@@ -30,7 +30,7 @@ class Channel:
     destination_port: Optional[int]
 
     constant: Optional[Constant]
-    hold: bool # whether it holds an infinite number of constant values, only meaning full if constant != None
+    hold: bool # whether it holds the value and cannot be popped
 
 
 @dataclass
@@ -78,7 +78,7 @@ class DataflowGraph:
                 if input["type"] == "data":
                     input_pe_id = input["ID"]
                     input_pe_port = input["oport"]
-                    channel = Channel(channel_id, input_pe_id, input_pe_port, i, port, None, False)
+                    channel = Channel(channel_id, input_pe_id, input_pe_port, i, port, None, input["hold"])
                     
                     if input_pe_id not in output_channels:
                         output_channels[input_pe_id] = {}

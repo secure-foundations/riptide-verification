@@ -288,8 +288,10 @@ class DataflowVisualizer:
                 else:
                     additional_attributes += f" headlabel={channel.destination_port}"
 
+                label = "(hold) " if channel.hold else ""
+
                 if channel_label is not None:
-                    additional_attributes += f" label=\"{channel_label(channel.id)}\""
+                    additional_attributes += f" label=\"{label}{channel_label(channel.id)}\""
 
                 elements.append(f"v{channel.source}->v{channel.destination} [arrowsize=0.4{additional_attributes}]")
 

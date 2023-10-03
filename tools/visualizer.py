@@ -226,7 +226,7 @@ OPERATOR_INFO = {
         },
     },
     "STREAM_FU_CFG_T": {
-        "dot_label": lambda pe: f"<Str{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}>",
+        "dot_label": lambda pe: f"<Str<FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}</FONT>>",
         "dot_attr": f"{_DOT_CIRCLE_ATTR} style=filled fillcolor=cadetblue1",
         "dot_input_port_positions": {
             0: "nw",

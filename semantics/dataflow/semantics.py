@@ -321,11 +321,6 @@ class NextConfiguration(StepResult):
 
 
 @dataclass
-class NoTransition(StepResult):
-    ...
-
-
-@dataclass
 class StepException(StepResult):
     reason: str
 
@@ -526,23 +521,23 @@ class Configuration:
     def step_exhaust(self, pe_id: int) -> Tuple[StepResult, ...]:
         """
         Similar to step, but will attempt all possible transitions on the specified PE,
-        including those after branching
+        including those after branching.
+        Note that this may not terminate on some PEs such as Stream
         """
 
         final_results = []
         results = list(self.step(pe_id))
 
-        if len(results) == 1 and isinstance(results[0], NoTransition):
-            return NoTransition(),
-
         while len(results) != 0:
+            print(f"executing {pe_id}")
+
             result = results.pop(0)
 
             if isinstance(result, NextConfiguration):
                 next_results = result.config.step(pe_id)
 
-                if len(next_results) == 1 and isinstance(next_results[0], NoTransition):
-                    final_results.append(next_results[0])
+                if len(next_results) == 0:
+                    final_results.append(result)
                 else:
                     results.extend(next_results)
 
@@ -552,14 +547,13 @@ class Configuration:
             else:
                 assert False, f"unexpected step result {result}"
 
-        return final_results
+        return tuple(final_results)
 
     def step(self, pe_id: int) -> Tuple[StepResult, ...]:
         """
-        Execute the `pe_index`th PE in the dataflow graph,
-        until either one fo the following case happens:
-        - A transition is executed
-        - No transition possible
+        Execute the `pe_index`th PE in the dataflow graph for at most one transition
+        Returns () if no transition is possible,
+        Otherwise return a tuple of results
         """
         
         pe_info = self.graph.vertices[pe_id]
@@ -574,7 +568,7 @@ class Configuration:
         for channel_id in input_channel_ids:
             if not self.channel_states[channel_id].ready():
                 # Channel not ready
-                return NoTransition(),
+                return ()
 
         # print("triggering", str(pe_info.id))
 

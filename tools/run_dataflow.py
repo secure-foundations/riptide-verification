@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
-from semantics.dataflow.semantics import NextConfiguration, NoTransition, StepException, Configuration, WORD_WIDTH
+from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH
 from semantics.dataflow.permission import MemoryPermissionSolver
 
 
@@ -52,24 +52,20 @@ def main():
         # Try step each PE until hit a branch or exhausted
         changed = False
         for pe_info in dfg.vertices:
-            results = config.step(pe_info.id)
+            results = config.step_exhaust(pe_info.id)
 
-            if len(results) == 1:
+            if len(results) == 0:
+                continue
+            elif len(results) == 1:
                 if isinstance(results[0], NextConfiguration):
                     changed = True
                     config = results[0].config
-                    # print(f"PE {pe_info.id} fired")
-                    # print(config)
-                else:
-                    ...
-                    # print(f"PE {pe_info.id} not fireable")
+                elif isinstance(results[0], StepException):
+                    assert False, f"got exception: {results[0].reason}"
             else:
                 changed = True
                 # print(f"branching on {pe_info.id}!", len(results))
                 configs.extend((result.config, num_steps + 1) for result in results if isinstance(result, NextConfiguration))
-                
-                # for config, _ in configs:
-                #     print(config)
                 break
         else:
             # print("no branching")

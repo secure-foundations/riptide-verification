@@ -334,13 +334,16 @@ class Configuration:
     channel_states: Tuple[ChannelState, ...] = ()
 
     # Memory is currently modelled as a map
-    # base |-> array of ints
-    # This is assuming all bases represent disjoint regions of memory
+    # address (WORD_WIDTH) |-> value (WORD_WIDTH)
     memory: List[MemoryUpdate] = field(default_factory=list)
+
+    # memory_var represents the current state of the memory
+    # if None, means the current memory_var is outdated and does not capture the
+    # current memory updates
     memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
     memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
 
-    path_constraints: List[smt.SMTTerm] = field(default_factory=list)
+    path_conditions: List[smt.SMTTerm] = field(default_factory=list)
     permission_constraints: List[permission.Formula] = field(default_factory=list)
 
     permission_var_count: int = 0
@@ -404,7 +407,7 @@ class Configuration:
 
     @staticmethod
     def get_fresh_memory_var() -> smt.SMTTerm:
-        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH))))
+        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)))
 
     def copy(self) -> Configuration:
         return Configuration(
@@ -415,23 +418,23 @@ class Configuration:
             list(self.memory),
             self.memory_var,
             list(self.memory_constraints),
-            list(self.path_constraints),
+            list(self.path_conditions),
             list(self.permission_constraints),
             self.permission_var_count,
         )
-    
+
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
         self.memory.append(MemoryUpdate(base, index, value))
 
-        new_var = Configuration.get_fresh_memory_var()
+        new_memory_var = Configuration.get_fresh_memory_var()
         self.memory_constraints.append(smt.Equals(
-            new_var,
-            smt.Store(self.memory_var, base, smt.Store(smt.Select(self.memory_var, base), index, value)),
+            new_memory_var,
+            smt.Store(self.memory_var, smt.BVAdd(base, index), value),
         ))
-        self.memory_var = new_var
+        self.memory_var = new_memory_var
 
     def read_memory(self, base: smt.SMTTerm, index: smt.SMTTerm) -> smt.SMTTerm:
-        return smt.Select(smt.Select(self.memory_var, base), index)
+        return smt.Select(self.memory_var, smt.BVAdd(base, index))
 
     def get_fresh_permission_var(self, prefix="p") -> permission.PermissionVariable:
         var = permission.PermissionVariable(f"{prefix}{self.permission_var_count}")
@@ -443,8 +446,11 @@ class Configuration:
 
     def check_feasibility(self) -> bool:
         with smt.Solver(name="z3") as solver:
-            for path_condition in self.path_constraints:
+            for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
+
+            for memory_constraint in self.memory_constraints:
+                solver.add_assertion(memory_constraint)
 
             # true for sat, false for unsat
             return solver.solve()
@@ -509,7 +515,7 @@ class Configuration:
             lines.append(f"  {update.base}[{update.index}] = {update.value}")
 
         lines.append(f"path conditions:")
-        for constraint in self.path_constraints:
+        for constraint in self.path_conditions:
             lines.append(f"  {constraint}")
 
         max_line_width = max(map(len, lines))
@@ -529,8 +535,6 @@ class Configuration:
         results = list(self.step(pe_id))
 
         while len(results) != 0:
-            print(f"executing {pe_id}")
-
             result = results.pop(0)
 
             if isinstance(result, NextConfiguration):
@@ -631,20 +635,20 @@ class Configuration:
             )
 
             configuration_true.operator_states[pe_info.id].current_transition = output_value.true_branch
-            configuration_true.path_constraints.append(output_value.condition.simplify())
+            configuration_true.path_conditions.append(output_value.condition.simplify())
             configuration_true.permission_constraints.append(permission_constraint)
 
             configuration_false.operator_states[pe_info.id].current_transition = output_value.false_branch
-            configuration_false.path_constraints.append(smt.Not(output_value.condition).simplify())
+            configuration_false.path_conditions.append(smt.Not(output_value.condition).simplify())
             configuration_false.permission_constraints.append(permission_constraint)
 
             if not configuration_true.check_feasibility():
                 # since the negation is unsat, the condition itself must be valid
-                configuration_false.path_constraints.pop(-1)
+                configuration_false.path_conditions.pop()
                 return NextConfiguration(configuration_false),
 
             if not configuration_false.check_feasibility():
-                configuration_true.path_constraints.pop(-1)
+                configuration_true.path_conditions.pop()
                 return NextConfiguration(configuration_true),
 
             return NextConfiguration(configuration_true), NextConfiguration(configuration_false)

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 
 WORD_WIDTH = 64
+BYTE_WIDTH = 8
 
 
 class ASTNode:

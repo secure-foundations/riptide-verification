@@ -27,6 +27,13 @@ class FunctionException(StepResult):
 
 
 @dataclass
+class MemoryUpdate:
+    location: smt.SMTTerm
+    value: smt.SMTTerm
+    bit_width: int
+
+
+@dataclass
 class Configuration:
     module: Module
     function: Function
@@ -38,19 +45,40 @@ class Configuration:
     variables: Dict[str, smt.SMTTerm]
     path_conditions: List[smt.SMTTerm]
 
-    # Fresh array variable
-    memory: smt.SMTTerm = field(
-        default_factory=lambda: smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(8))),
-    )
+    # For book keeping purposes
+    memory_updates: List[MemoryUpdate] = field(default_factory=list)
+
+    # memory_constraints will look like (m0 is the initial free memory variable)
+    # m1 = store(m0, l0, v0)
+    # m2 = store(m1, l1, v1)
+    # ...
+    memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
+    memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
 
     def __str__(self) -> str:
-        variables_string = ", ".join(f"{name}: {term}" for name, term in self.variables.items())
-        if len(self.path_conditions) != 0:
-            path_conditions_string = " /\ ".join(map(str, self.path_conditions))
-        else:
-            path_conditions_string = "true"
-        return f"<current instruction: {self.current_block}@{self.current_instr_counter}, previous block: {self.previous_block}, variables: {variables_string}, memory: {self.memory}> | {path_conditions_string}"
+        lines = []
 
+        lines.append(f"current instruction: {self.current_block}:{self.current_instr_counter}")
+        lines.append(f"previous block: {self.previous_block}")
+
+        lines.append("variables:")
+        for name, term in self.variables.items():
+            lines.append(f"  {name}: {term}")
+
+        lines.append("memory updates:")
+        for update in self.memory_updates:
+            lines.append(f"  {update.location} |-> {update.value} ({update.bit_width}-bit)")
+
+        lines.append("path conditions:")
+        for path_condition in self.path_conditions:
+            lines.append(f"  {path_condition}")
+
+        # max_line_width = max(map(len, lines))
+        # lines = [ f"## {line}{' ' * (max_line_width - len(line))} ##" for line in lines ]
+        # lines = [ "#" * (max_line_width + 6) ] + lines + [ "#" * (max_line_width + 6) ]
+
+        return "\n".join(lines)
+    
     @staticmethod
     def get_initial_configuration(module: Module, function: Function) -> Configuration:
         variables = {}
@@ -68,6 +96,10 @@ class Configuration:
             variables=variables,
             path_conditions=[],
         )
+    
+    @staticmethod
+    def get_fresh_memory_var() -> smt.SMTTerm:
+        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(BYTE_WIDTH)))
 
     def copy(self) -> Configuration:
         return Configuration(
@@ -78,7 +110,9 @@ class Configuration:
             self.current_instr_counter,
             dict(self.variables),
             list(self.path_conditions),
-            self.memory,
+            list(self.memory_updates),
+            self.memory_var,
+            list(self.memory_constraints),
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -109,6 +143,9 @@ class Configuration:
             for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
 
+            for memory_constraint in self.memory_constraints:
+                solver.add_assertion(memory_constraint)
+
             # true for sat (i.e. feasible), false for unsat
             return solver.solve()
 
@@ -118,21 +155,27 @@ class Configuration:
         Location should be a BV of width WORD_WIDTH
         """
 
-        # Align bit_width to 8
-        aligned_bit_width = (bit_width + 7) // 8 * 8
+        self.memory_updates.append(MemoryUpdate(location, value, bit_width))
+
+        # Align bit_width to BYTE_WIDTH
+        aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
         increase = aligned_bit_width - bit_width
 
         extended_value = smt.BVZExt(value, increase)
 
-        for i in range(aligned_bit_width // 8):
+        new_memory_var = Configuration.get_fresh_memory_var()
+        updated_memory_var = self.memory_var
+
+        for i in range(aligned_bit_width // BYTE_WIDTH):
             # store the ith byte to dest + i
-            self.memory = smt.Store(
-                self.memory,
+            updated_memory_var = smt.Store(
+                updated_memory_var,
                 smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
-                smt.BVExtract(extended_value, i * 8, i * 8 + 7),
+                smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
             )
-        
-        self.memory = self.memory.simplify()
+
+        self.memory_constraints.append(smt.Equals(new_memory_var, updated_memory_var.simplify()))
+        self.memory_var = new_memory_var
     
     def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:
         """
@@ -141,12 +184,12 @@ class Configuration:
 
         assert bit_width > 0
 
-        aligned_bit_width = (bit_width + 7) // 8 * 8
+        aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
         increase = aligned_bit_width - bit_width
 
         read_bytes = (
-            smt.Select(self.memory, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
-            for i in range(aligned_bit_width // 8)
+            smt.Select(self.memory_var, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
+            for i in range(aligned_bit_width // BYTE_WIDTH)
         )
         
         value = smt.BVConcat(*read_bytes)
@@ -194,6 +237,12 @@ class Configuration:
                     self.eval_value(instr.right),
                 )
 
+            elif instr.cond == "slt":
+                result = smt.BVSLT(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
             else:
                 assert False, f"icmp condition {instr.cond} not implemented"
 
@@ -208,7 +257,7 @@ class Configuration:
             index = instr.indices[0]
 
             element_bit_width = instr.base_type.get_bit_width()
-            aligned_element_byte_count = (element_bit_width + 7) // 8
+            aligned_element_byte_count = (element_bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH
 
             index_value = self.eval_value(index)
             index_bit_width = index.get_type().get_bit_width()

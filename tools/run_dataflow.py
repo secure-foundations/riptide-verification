@@ -76,7 +76,7 @@ def main():
             num_terminating_configs += 1
 
             print(f"terminating configuration #{num_terminating_configs} after {num_steps} step(s)")
-            print(f"  path constraints: {config.path_constraints}")
+            print(f"  path constraints: {config.path_conditions}")
             print("  memory updates:")
             for update in config.memory:
                 print(f"    {update.base}[{update.index}] = {update.value}")

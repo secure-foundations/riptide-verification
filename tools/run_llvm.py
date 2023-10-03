@@ -14,7 +14,9 @@ def main():
 
     print(module)
 
-    config = Configuration.get_initial_configuration(module, module.functions["@test"])
+    assert(len(module.functions) == 1)
+
+    config = Configuration.get_initial_configuration(module, list(module.functions.values())[0])
 
     print(config)
 

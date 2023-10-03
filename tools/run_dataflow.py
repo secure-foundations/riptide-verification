@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
-from semantics.dataflow.semantics import SymbolicExecutor, WORD_WIDTH
+from semantics.dataflow.semantics import NextConfiguration, NoTransition, StepException, Configuration, WORD_WIDTH
 from semantics.dataflow.permission import MemoryPermissionSolver
 
 
@@ -35,19 +35,48 @@ def main():
 
     print("function argument to SMT variables:", free_vars)
 
-    executor = SymbolicExecutor(dfg, free_vars)
-
     heap_objects = MemoryPermissionSolver.get_static_heap_objects(dfg)
 
-    configs = [(executor.configurations[0], 0)]
+    configs = [(Configuration.get_initial_configuration(dfg, free_vars), 0)]
     num_terminating_configs = 0
 
     # Doing a BFS on the state space
-    while len(configs):
-        config, num_steps = configs.pop(0)
-        next_configs = executor.step(config)
+    while len(configs) != 0:
+        # print(f"=============== {len(configs)}")
+        # for config, _ in configs:
+        #     print(config.path_constraints)
 
-        if len(next_configs) == 0:
+        config, num_steps = configs.pop(0)
+        # print(config)
+
+        # Try step each PE until hit a branch or exhausted
+        changed = False
+        for pe_info in dfg.vertices:
+            results = config.step(pe_info.id)
+
+            if len(results) == 1:
+                if isinstance(results[0], NextConfiguration):
+                    changed = True
+                    config = results[0].config
+                    # print(f"PE {pe_info.id} fired")
+                    # print(config)
+                else:
+                    ...
+                    # print(f"PE {pe_info.id} not fireable")
+            else:
+                changed = True
+                # print(f"branching on {pe_info.id}!", len(results))
+                configs.extend((result.config, num_steps + 1) for result in results if isinstance(result, NextConfiguration))
+                
+                # for config, _ in configs:
+                #     print(config)
+                break
+        else:
+            # print("no branching")
+            if changed:
+                configs.append((config, num_steps + 1))
+
+        if not changed:
             num_terminating_configs += 1
 
             print(f"terminating configuration #{num_terminating_configs} after {num_steps} step(s)")
@@ -55,10 +84,8 @@ def main():
             print("  memory updates:")
             for update in config.memory:
                 print(f"    {update.base}[{update.index}] = {update.value}")
-            
-            # for i, channel in enumerate(config.channel_states):
-            #     print(f"  channel {i}: {len(channel.values)} value(s)")
 
+            # Check memory permission constraints
             print(f"  {len(config.permission_constraints)} permission constraint(s)")
             solution = MemoryPermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
             # for constraint in config.permission_constraints:
@@ -68,19 +95,6 @@ def main():
                 break
 
             print("  found a permission solution")
-
-            if args.n is not None and num_terminating_configs >= args.n:
-                break
-
-            # for var, term in solution.items():
-            #     print(f"{var} = {term}")
-
-        else:
-            # print("#########################")
-            # for i, channel in enumerate(next_configs[0].channel_states):
-            #     print(f"  channel {i}: {len(channel.values)} value(s)")
-
-            configs.extend(tuple(zip(next_configs, [num_steps + 1] * len(next_configs))))
 
 
 if __name__ == "__main__":

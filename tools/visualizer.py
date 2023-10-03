@@ -1,10 +1,10 @@
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 import json
 import html
 from argparse import ArgumentParser
 
-from semantics.dataflow.graph import DataflowGraph, FunctionArgument, ConstantValue
+from semantics.dataflow.graph import DataflowGraph, FunctionArgument, ConstantValue, ProcessingElement
 
 
 _BINARY_ARITH_PORT_POSITIONS = {
@@ -168,7 +168,7 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_INVARIANT": {
-        "dot_label": lambda pe: f"<Inv<SUB><FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT></SUB>>",
+        "dot_label": lambda pe: f"<Inv<FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT>>",
         "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
@@ -179,7 +179,7 @@ OPERATOR_INFO = {
         },
     },
     "CF_CFG_OP_CARRY": {
-        "dot_label": lambda pe: f"<C<SUB><FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT></SUB>>",
+        "dot_label": lambda pe: f"<C<FONT POINT-SIZE=\"7\">{'T' if pe.pred == 'CF_CFG_PRED_TRUE' else 'F'}</FONT>>",
         "dot_attr": f"{_DOT_SQUARE_ATTRS} style=filled fillcolor=grey",
         "dot_input_port_positions": {
             0: "w",
@@ -226,7 +226,7 @@ OPERATOR_INFO = {
         },
     },
     "STREAM_FU_CFG_T": {
-        "dot_label": lambda pe: f"<Str<SUB>{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}</SUB>>",
+        "dot_label": lambda pe: f"<Str{'T' if pe.pred == 'STREAM_CFG_PRED_TRUE' else 'F'}>",
         "dot_attr": f"{_DOT_CIRCLE_ATTR} style=filled fillcolor=cadetblue1",
         "dot_input_port_positions": {
             0: "nw",
@@ -243,7 +243,12 @@ OPERATOR_INFO = {
 
 class DataflowVisualizer:
     @staticmethod
-    def generate_dot_description(graph: DataflowGraph, channel_label: Callable[[int], str] = str, llvm_annotation: bool = True) -> str:
+    def generate_dot_description(
+        graph: DataflowGraph,
+        pe_label: Optional[Callable[[ProcessingElement], str]] = None,
+        channel_label: Optional[Callable[[int], str]] = str,
+        llvm_annotation: bool = True,
+    ) -> str:
         """
         Generate a visualization of the graph in dot format
         """
@@ -263,7 +268,10 @@ class DataflowVisualizer:
                 label = html.escape(label)
             
             if pe.llvm_position is not None and llvm_annotation:
-                label += f"<BR/><FONT point-size=\"5\">{pe.llvm_position[0]}:{pe.llvm_position[1]}</FONT>"
+                label += f"<FONT point-size=\"5\"><BR/>{pe.llvm_position[0]}:{pe.llvm_position[1]}</FONT>"
+
+            if pe_label is not None:
+                label = f"<FONT point-size=\"5\">{pe_label(pe)}<BR/></FONT>" + label
 
             elements.append(f"v{pe.id} [label=<{label}> {attr}]")
 
@@ -332,6 +340,7 @@ digraph {
 def _main():
     parser = ArgumentParser()
     parser.add_argument("o2p", help="Input dataflow graph")
+    parser.add_argument("--label-pe-id", default=False, action="store_const", const=True)
     parser.add_argument("--no-channel-id", default=False, action="store_const", const=True)
     parser.add_argument("--no-llvm-annotation", default=False, action="store_const", const=True)
     args = parser.parse_args()
@@ -340,6 +349,7 @@ def _main():
         dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_file))
         print(DataflowVisualizer.generate_dot_description(
             dfg,
+            (lambda pe: str(pe.id)) if args.label_pe_id else None,
             (lambda _: "") if args.no_channel_id else str,
             not args.no_llvm_annotation,
         ))

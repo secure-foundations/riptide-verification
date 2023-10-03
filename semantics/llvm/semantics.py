@@ -93,7 +93,7 @@ class Configuration:
 
     def eval_value(self, value: Value) -> smt.SMTTerm:
         if isinstance(value, IntegerConstant):
-            return smt.BV(value.value % (2 ** value.type.bit_width), value.type.bit_width)
+            return smt.BVConst(value.value, value.type.bit_width)
 
         elif isinstance(value, Instruction):
             return self.get_variable(value.get_defined_variable())
@@ -128,7 +128,7 @@ class Configuration:
             # store the ith byte to dest + i
             self.memory = smt.Store(
                 self.memory,
-                smt.BVAdd(location, smt.BV(i, WORD_WIDTH)),
+                smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
                 smt.BVExtract(extended_value, i * 8, i * 8 + 7),
             )
         
@@ -145,7 +145,7 @@ class Configuration:
         increase = aligned_bit_width - bit_width
 
         read_bytes = (
-            smt.Select(self.memory, smt.BVAdd(location, smt.BV(i, WORD_WIDTH)))
+            smt.Select(self.memory, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
             for i in range(aligned_bit_width // 8)
         )
         
@@ -197,7 +197,7 @@ class Configuration:
             else:
                 assert False, f"icmp condition {instr.cond} not implemented"
 
-            self.set_variable(instr.name, smt.Ite(result, smt.BV(1, 1), smt.BV(0, 1)))
+            self.set_variable(instr.name, smt.Ite(result, smt.BVConst(1, 1), smt.BVConst(0, 1)))
             self.current_instr_counter += 1
             return NextConfiguration(self),
     
@@ -220,7 +220,7 @@ class Configuration:
             pointer = smt.BVAdd(
                 pointer,
                 smt.BVMul(
-                    smt.BV(aligned_element_byte_count, WORD_WIDTH),
+                    smt.BVConst(aligned_element_byte_count, WORD_WIDTH),
                     index_value,
                 ),
             )
@@ -246,7 +246,7 @@ class Configuration:
             return NextConfiguration(self),
     
         elif isinstance(instr, SelectInstruction):
-            cond = smt.Equals(self.eval_value(instr.cond), smt.BV(0, 1))
+            cond = smt.Equals(self.eval_value(instr.cond), smt.BVConst(0, 1))
 
             self.current_instr_counter += 1
             other = self.copy()
@@ -281,7 +281,7 @@ class Configuration:
             return NextConfiguration(self),
 
         elif isinstance(instr, BranchInstruction):
-            cond = smt.Equals(self.eval_value(instr.cond), smt.BV(0, 1))
+            cond = smt.Equals(self.eval_value(instr.cond), smt.BVConst(0, 1))
 
             # Br is always at the end of a block
             self.current_instr_counter = 0

@@ -11,7 +11,7 @@ from pysmt.shortcuts import ( # type: ignore
     Array, Select,
     get_free_variables,
     Plus, Store, Times,
-    BVAdd, BVMul, BVZExt, BVSExt, BVExtract, BVConcat, BVSGE, BVSGT, BVUGT,
+    BVAdd, BVMul, BVZExt, BVSExt, BVExtract, BVConcat, BVSGE, BVSGT, BVUGT, BVULT, BVNeg,
 )
 from pysmt.typing import BOOL, INT, STRING, BVType, FunctionType, ArrayType, Type # type: ignore
 from pysmt.smtlib.parser import SmtLibParser # type: ignore
@@ -34,6 +34,16 @@ SMTScript = Any
 
 _fresh_sort_counter = 0
 
+
+def BVConst(value: int, width: int) -> SMTTerm:
+    """
+    Similar to smt.BV, but supports negative integers too
+    """
+
+    if value < 0:
+        return BVNeg(BV(-value, width))
+    else:
+        return BV(value, width)
 
 def reset() -> None:
     """

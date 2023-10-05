@@ -14,7 +14,7 @@ def main():
     See examples/bisim/test-1.png for operator and channel IDs in the dataflow graph
     """
 
-    with open("examples/bisim/test-1.o2p") as dataflow_source:
+    with open("examples/test-1/test-1.o2p") as dataflow_source:
         dfg = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
         # Set up initial config for the dataflow program
@@ -37,7 +37,7 @@ def main():
             ),
         )
 
-    with open("examples/bisim/test-1.ll") as f:
+    with open("examples/test-1/test-1.ll") as f:
         module = llvm.Parser.parse_module(f.read())
         function = tuple(module.functions.values())[0]
     
@@ -90,7 +90,8 @@ def main():
                     match = dataflow_invariant_config.match(result.config)
                     if isinstance(match, MatchingSuccess):
                         print(f"[dataflow] found a matched config at step {num_steps + 1}")
-                        matched_dataflow_configs.append(result.config)
+                        # TODO: check match condition here
+                        matched_dataflow_configs.append((result.config, match))
                     else:
                         queue.append((result.config, num_steps + 1))
 
@@ -112,7 +113,7 @@ def main():
                     match = llvm_invariant_config.match(result.config)
                     if isinstance(match, MatchingSuccess):
                         print(f"[llvm] found a matched config")
-                        matched_llvm_configs.append(result.config)
+                        matched_llvm_configs.append((result.config, match))
                     else:
                         queue.append(result.config)
 
@@ -124,11 +125,15 @@ def main():
                     assert False, f"unsupported result {result}"
     
         print("### matched configs")
-        for config in matched_dataflow_configs:
+        for config, match in matched_dataflow_configs:
             print(config)
+            print("matching substitution:", match.substitution)
+            print("matching condition:", match.condition.simplify())
         
-        for config in matched_llvm_configs:
+        for config, match in matched_llvm_configs:
             print(config)
+            print("matching substitution:", match.substitution)
+            print("matching condition:", match.condition.simplify())
 
         print("### final configs")
         for config in final_dataflow_configs:

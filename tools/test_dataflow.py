@@ -14,7 +14,6 @@ def main():
     with open("examples/bisim/test-1.o2p") as dataflow_source:
         dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
 
-    function_arg_names = set(arg.variable_name for arg in dfg.function_arguments)
     free_vars: Dict[str, smt.SMTTerm] = {}
 
     for function_arg in dfg.function_arguments:

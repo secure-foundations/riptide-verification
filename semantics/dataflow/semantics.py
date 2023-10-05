@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Tuple, Optional, List, Generator, Type, Dict, Mapping, Any, Set, Callable
 from dataclasses import dataclass, field
+from collections import OrderedDict
 
 import inspect
 
 import semantics.smt as smt
 
+from semantics.matching import *
 from . import permission
 from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
 
@@ -52,6 +54,14 @@ class Operator:
     
     def copy(self) -> Operator:
         return type(self)(self.pe, self.internal_permission, self.current_transition)
+
+    def match(self, other: Operator) -> MatchingResult:
+        assert self.pe == other.pe, "invalid pattern"
+        # TODO: permission matching
+        if self.current_transition == other.current_transition:
+            return MatchingSuccess()
+        else:
+            return MatchingFailure()
 
 
 @Operator.implement("ARITH_CFG_OP_EQ")
@@ -151,6 +161,11 @@ class InvariantOperator(Operator):
         copied = super().copy()
         copied.value = self.value
         return copied
+    
+    def match(self, other: Operator) -> MatchingResult:
+        result = super().match(other)
+        assert isinstance(other, InvariantOperator)
+        return result.merge(MatchingResult.match_smt_terms(self.value, other.value))
 
     def start(self, config: Configuration, value: ChannelId(1)) -> ChannelId(0):
         self.transition_to(InvariantOperator.loop)
@@ -177,6 +192,9 @@ class StreamOperator(Operator):
 
         self.current: Optional[smt.SMTTerm] = None
         self.end: Optional[smt.SMTTerm] = None
+
+    def match(self, other: Operator) -> MatchingResult:
+        raise NotImplementedError()
     
     def copy(self) -> StreamOperator:
         copied = super().copy()
@@ -270,6 +288,12 @@ class LoadOperator(Operator):
         return config.read_memory(base, index)
 
 
+# Only to be used in patterns
+class WildcardOperator(Operator):
+    def start(self, config: Configuration):
+        assert False, "cannot execute the wildcard operator"
+
+
 @dataclass
 class PermissionedValue:
     term: smt.SMTTerm
@@ -304,6 +328,22 @@ class ChannelState:
         return ChannelState(self.hold_constant, list(self.values))
 
 
+# Only to be used in patterns
+@dataclass
+class WildcardChannelState(ChannelState):
+    def pop(self) -> PermissionedValue:
+        assert False, "cannot pop from a wildcard channel state"
+
+    def push(self, value: PermissionedValue) -> None:
+        assert False, "cannot push to a wildcard channel state"
+
+    def ready(self) -> bool:
+        assert False, "cannot check status of a wildcard channel state"
+
+    def copy(self) -> ChannelState:
+        return self
+
+
 @dataclass
 class MemoryUpdate:
     base: smt.SMTTerm
@@ -335,7 +375,7 @@ class Configuration:
 
     # Memory is currently modelled as a map
     # address (WORD_WIDTH) |-> value (WORD_WIDTH)
-    memory: List[MemoryUpdate] = field(default_factory=list)
+    memory_updates: List[MemoryUpdate] = field(default_factory=list)
 
     # memory_var represents the current state of the memory
     # if None, means the current memory_var is outdated and does not capture the
@@ -344,9 +384,85 @@ class Configuration:
     memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
 
     path_conditions: List[smt.SMTTerm] = field(default_factory=list)
-    permission_constraints: List[permission.Formula] = field(default_factory=list)
 
+    permission_constraints: List[permission.Formula] = field(default_factory=list)
     permission_var_count: int = 0
+
+    def match(self, other: Configuration) -> MatchingResult:
+        """
+        Treat self as a pattern and match other against self
+
+        Assumption on self:
+        - self.graph == other.graph
+        - free_var is empty
+        - memory_updates and memory_constraints are empty
+
+        TODO: handle permissions
+        """
+
+        assert self.graph == other.graph
+        assert len(self.free_vars) == 0
+        assert len(self.memory_updates) == 0
+        assert len(self.memory_constraints) == 0
+
+        result = MatchingSuccess()
+
+        # Match operator states
+        assert len(self.operator_states) == len(other.operator_states)
+        for self_op, other_op in zip(self.operator_states, other.operator_states):
+            if isinstance(self_op, WildcardOperator):
+                ...
+                # TODO: do anything?
+
+            else:
+                assert not isinstance(other_op, WildcardOperator)
+                result = result.merge(self_op.match(other_op))
+                if isinstance(result, MatchingFailure):
+                    return result
+
+        # Match channel states
+        assert len(self.channel_states) == len(other.channel_states)
+        for self_channel, other_channel in zip(self.channel_states, other.channel_states):
+            if isinstance(self_channel, WildcardChannelState):
+                ...
+                # TODO: do anything here?
+
+            else:
+                assert not isinstance(other_channel, WildcardChannelState)
+
+                if self_channel.hold_constant is None != other_channel.hold_constant is None:
+                    return MatchingFailure()
+                
+                if self_channel.hold_constant is None:
+                    if len(self_channel.values) != len(other_channel.values):
+                        return MatchingFailure()
+                    else:
+                        for self_value, other_value in zip(self_channel.values, other_channel.values):
+                            result = result.merge(MatchingResult.match_smt_terms(self_value, other_value))
+                            if isinstance(result, MatchingFailure):
+                                return result
+                else:
+                    result = result.merge(MatchingResult.match_smt_terms(
+                        self_channel.hold_constant,
+                        other_channel.hold_constant,
+                    ))
+                    if isinstance(result, MatchingFailure):
+                        return result
+
+        assert isinstance(result, MatchingSuccess)
+
+        substituted_path_conditions = (
+            path_condition.substitute(result.substitution)
+            for path_condition in self.path_conditions
+        )
+        
+        return MatchingSuccess(result.substitution, smt.And(
+            result.condition,
+            smt.Implies(
+                smt.And(*other.path_conditions),
+                smt.And(*substituted_path_conditions),
+            ),
+        ))
 
     @staticmethod
     def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm]):
@@ -415,7 +531,7 @@ class Configuration:
             self.free_vars,
             tuple(operator.copy() for operator in self.operator_states),
             tuple(state.copy() for state in self.channel_states),
-            list(self.memory),
+            list(self.memory_updates),
             self.memory_var,
             list(self.memory_constraints),
             list(self.path_conditions),
@@ -424,7 +540,7 @@ class Configuration:
         )
 
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
-        self.memory.append(MemoryUpdate(base, index, value))
+        self.memory_updates.append(MemoryUpdate(base, index, value))
 
         new_memory_var = Configuration.get_fresh_memory_var()
         self.memory_constraints.append(smt.Equals(
@@ -511,7 +627,7 @@ class Configuration:
                         lines.append(f"    {value}")
         
         lines.append(f"memory updates:")
-        for update in self.memory:
+        for update in self.memory_updates:
             lines.append(f"  {update.base}[{update.index}] = {update.value}")
 
         lines.append(f"path conditions:")

@@ -340,7 +340,7 @@ digraph {
 def _main():
     parser = ArgumentParser()
     parser.add_argument("o2p", help="Input dataflow graph")
-    parser.add_argument("--label-pe-id", default=False, action="store_const", const=True)
+    parser.add_argument("--no-pe-id", default=False, action="store_const", const=True)
     parser.add_argument("--no-channel-id", default=False, action="store_const", const=True)
     parser.add_argument("--no-llvm-annotation", default=False, action="store_const", const=True)
     args = parser.parse_args()
@@ -349,7 +349,7 @@ def _main():
         dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_file))
         print(DataflowVisualizer.generate_dot_description(
             dfg,
-            (lambda pe: str(pe.id)) if args.label_pe_id else None,
+            None if args.no_pe_id else (lambda pe: str(pe.id)),
             (lambda _: "") if args.no_channel_id else str,
             not args.no_llvm_annotation,
         ))

@@ -78,7 +78,7 @@ def main():
             print(f"terminating configuration #{num_terminating_configs} after {num_steps} step(s)")
             print(f"  path constraints: {config.path_conditions}")
             print("  memory updates:")
-            for update in config.memory:
+            for update in config.memory_updates:
                 print(f"    {update.base}[{update.index}] = {update.value}")
 
             # Check memory permission constraints

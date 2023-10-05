@@ -3,6 +3,8 @@ from typing import Tuple, List, Dict
 from dataclasses import dataclass
 
 import semantics.smt as smt
+
+from semantics.matching import *
 from .ast import *
 
 
@@ -42,7 +44,7 @@ class Configuration:
     previous_block: Optional[str]
     current_instr_counter: int # Position of the current instruction within current_block
 
-    variables: Dict[str, smt.SMTTerm]
+    variables: OrderedDict[str, smt.SMTTerm]
     path_conditions: List[smt.SMTTerm]
 
     # For book keeping purposes
@@ -78,10 +80,64 @@ class Configuration:
         # lines = [ "#" * (max_line_width + 6) ] + lines + [ "#" * (max_line_width + 6) ]
 
         return "\n".join(lines)
-    
+
+    def match(self, other: Configuration) -> MatchingResult:
+        """
+        Use self as a pattern and try to find an assignment to variables
+        in self so that self = other
+        
+        This assumes some constraints on self:
+        - memory_updates and memory_constraints should be empty
+        - all SMT terms in variables are SMT variables or have
+          free variables contained in the other configuration
+        
+        Returns (if successful) the matching substitution
+        and a condition for the matching to be valid ("other.path_condition => self.path_condition")
+        all variables in this condition is implicitly universally quantified
+        (so to check it, we need to check the unsat of the negation)
+        """
+
+        assert self.module == other.module and self.function == other.function
+        assert len(self.memory_updates) == 0
+        assert len(self.memory_constraints) == 0
+        
+        if self.current_block != other.current_block:
+            return MatchingFailure()
+        
+        if self.previous_block != other.previous_block:
+            return MatchingFailure()
+        
+        if self.current_instr_counter != other.current_instr_counter:
+            return MatchingFailure()
+        
+        result = MatchingSuccess()
+
+        for var_name, term in self.variables.items():
+            if var_name not in other.variables:
+                return MatchingFailure()
+            
+            result = result.merge(MatchingResult.match_smt_terms(term, other.variables[var_name]))
+            if isinstance(result, MatchingFailure):
+                return result
+
+        assert isinstance(result, MatchingSuccess)
+
+        substituted_path_conditions = (
+            path_condition.substitute(result.substitution)
+            for path_condition in self.path_conditions
+        )
+        
+        return MatchingSuccess(result.substitution, smt.And(
+            result.condition,
+            smt.Implies(
+                smt.And(*other.path_conditions),
+                smt.And(*substituted_path_conditions),
+            ),
+        ))
+
     @staticmethod
     def get_initial_configuration(module: Module, function: Function) -> Configuration:
-        variables = {}
+        variables = OrderedDict()
 
         for parameter in function.parameters.values():
             # TODO: right now this only supports pointers and integers

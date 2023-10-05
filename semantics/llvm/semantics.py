@@ -79,6 +79,9 @@ class Configuration:
         # lines = [ f"## {line}{' ' * (max_line_width - len(line))} ##" for line in lines ]
         # lines = [ "#" * (max_line_width + 6) ] + lines + [ "#" * (max_line_width + 6) ]
 
+        lines = [ "|| " + line for line in lines ]
+        lines = ["===== llvm state begin ====="] + lines + ["===== llvm state end ====="]
+
         return "\n".join(lines)
 
     def match(self, other: Configuration) -> MatchingResult:
@@ -102,19 +105,19 @@ class Configuration:
         assert len(self.memory_constraints) == 0
         
         if self.current_block != other.current_block:
-            return MatchingFailure()
+            return MatchingFailure("unmatched current block")
         
         if self.previous_block != other.previous_block:
-            return MatchingFailure()
+            return MatchingFailure("unmatched previous block")
         
         if self.current_instr_counter != other.current_instr_counter:
-            return MatchingFailure()
+            return MatchingFailure("unmatched instruction counter")
         
         result = MatchingSuccess()
 
         for var_name, term in self.variables.items():
             if var_name not in other.variables:
-                return MatchingFailure()
+                return MatchingFailure(f"variable {var_name} is not defined")
             
             result = result.merge(MatchingResult.match_smt_terms(term, other.variables[var_name]))
             if isinstance(result, MatchingFailure):

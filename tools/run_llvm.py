@@ -28,9 +28,7 @@ def main():
         results = config.step()
         for result in results:
             if isinstance(result, NextConfiguration):
-                config = result.config
-                queue.append(config)
-                # print(config)
+                queue.append(result.config)
             elif isinstance(result, FunctionReturn):
                 final_state_count += 1
                 print(f"\nfinal config #{final_state_count}")

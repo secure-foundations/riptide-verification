@@ -33,7 +33,8 @@ class MatchingSuccess:
             return MatchingFailure(f"failed to merge with other matching failure: {other.reason}")
         
         assert isinstance(other, MatchingSuccess)
-        assert set(self.substitution.keys()).issubset(set(other.substitution.keys))
+        assert set(self.substitution.keys()).isdisjoint(set(other.substitution.keys())), \
+               f"overlapping keys {set(self.substitution.keys())}, {set(other.substitution.keys())}"
         return MatchingSuccess(
             OrderedDict(tuple(self.substitution.items()) + tuple(other.substitution.items())),
             smt.And(self.condition, other.condition),

@@ -401,7 +401,7 @@ class Configuration:
         """
 
         assert self.graph == other.graph
-        assert len(self.free_vars) == 0
+        # assert len(self.free_vars) == 0
         assert len(self.memory_updates) == 0
         assert len(self.memory_constraints) == 0
 
@@ -438,13 +438,13 @@ class Configuration:
                         return MatchingFailure()
                     else:
                         for self_value, other_value in zip(self_channel.values, other_channel.values):
-                            result = result.merge(MatchingResult.match_smt_terms(self_value, other_value))
+                            result = result.merge(MatchingResult.match_smt_terms(self_value.term, other_value.term))
                             if isinstance(result, MatchingFailure):
                                 return result
                 else:
                     result = result.merge(MatchingResult.match_smt_terms(
-                        self_channel.hold_constant,
-                        other_channel.hold_constant,
+                        self_channel.hold_constant.term,
+                        other_channel.hold_constant.term,
                     ))
                     if isinstance(result, MatchingFailure):
                         return result
@@ -634,9 +634,12 @@ class Configuration:
         for constraint in self.path_conditions:
             lines.append(f"  {constraint}")
 
-        max_line_width = max(map(len, lines))
-        lines = [ f"## {line}{' ' * (max_line_width - len(line))} ##" for line in lines ]
-        lines = [ "#" * (max_line_width + 6) ] + lines + [ "#" * (max_line_width + 6) ]
+        # max_line_width = max(map(len, lines))
+        # lines = [ f"## {line}{' ' * (max_line_width - len(line))} ##" for line in lines ]
+        # lines = [ "#" * (max_line_width + 6) ] + lines + [ "#" * (max_line_width + 6) ]
+
+        lines = [ "|| " + line for line in lines ]
+        lines = ["===== dataflow state begin ====="] + lines + ["===== dataflow state end ====="]
 
         return "\n".join(lines)
 

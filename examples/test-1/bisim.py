@@ -127,13 +127,13 @@ def main():
         print("### matched configs")
         for config, match in matched_dataflow_configs:
             print(config)
+            assert match.check_condition(), "invalid match"
             print("matching substitution:", match.substitution)
-            print("matching condition:", match.condition.simplify())
         
         for config, match in matched_llvm_configs:
             print(config)
+            assert match.check_condition(), "invalid match"
             print("matching substitution:", match.substitution)
-            print("matching condition:", match.condition.simplify())
 
         print("### final configs")
         for config in final_dataflow_configs:

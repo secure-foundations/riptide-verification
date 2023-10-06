@@ -39,6 +39,15 @@ class MatchingSuccess:
             OrderedDict(tuple(self.substitution.items()) + tuple(other.substitution.items())),
             smt.And(self.condition, other.condition),
         )
+    
+    def check_condition(self) -> bool:
+        """
+        Check if the matching condition is valid
+        """
+
+        with smt.Solver(name="z3") as solver:
+            solver.add_assertion(smt.Not(self.condition))
+            return not solver.solve()
 
 
 @dataclass

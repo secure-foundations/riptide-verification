@@ -381,7 +381,6 @@ class Configuration:
     # if None, means the current memory_var is outdated and does not capture the
     # current memory updates
     memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
-    memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
 
     path_conditions: List[smt.SMTTerm] = field(default_factory=list)
 
@@ -395,7 +394,7 @@ class Configuration:
         Assumption on self:
         - self.graph == other.graph
         - free_var is empty
-        - memory_updates and memory_constraints are empty
+        - memory_updates is empty
 
         TODO: handle permissions
         """
@@ -403,7 +402,6 @@ class Configuration:
         assert self.graph == other.graph
         # assert len(self.free_vars) == 0
         assert len(self.memory_updates) == 0
-        assert len(self.memory_constraints) == 0
 
         result = MatchingSuccess()
 
@@ -530,7 +528,6 @@ class Configuration:
             tuple(state.copy() for state in self.channel_states),
             list(self.memory_updates),
             self.memory_var,
-            list(self.memory_constraints),
             list(self.path_conditions),
             list(self.permission_constraints),
             self.permission_var_count,
@@ -540,7 +537,7 @@ class Configuration:
         self.memory_updates.append(MemoryUpdate(base, index, value))
 
         new_memory_var = Configuration.get_fresh_memory_var()
-        self.memory_constraints.append(smt.Equals(
+        self.path_conditions.append(smt.Equals(
             new_memory_var,
             smt.Store(self.memory_var, smt.BVAdd(base, index), value),
         ))
@@ -561,9 +558,6 @@ class Configuration:
         with smt.Solver(name="z3") as solver:
             for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
-
-            for memory_constraint in self.memory_constraints:
-                solver.add_assertion(memory_constraint)
 
             # true for sat, false for unsat
             return solver.solve()

@@ -50,12 +50,7 @@ class Configuration:
     # For book keeping purposes
     memory_updates: List[MemoryUpdate] = field(default_factory=list)
 
-    # memory_constraints will look like (m0 is the initial free memory variable)
-    # m1 = store(m0, l0, v0)
-    # m2 = store(m1, l1, v1)
-    # ...
     memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
-    memory_constraints: List[smt.SMTTerm] = field(default_factory=list)
 
     def __str__(self) -> str:
         lines = []
@@ -90,7 +85,7 @@ class Configuration:
         in self so that self = other
         
         This assumes some constraints on self:
-        - memory_updates and memory_constraints should be empty
+        - memory_updates should be empty
         - all SMT terms in variables are SMT variables or have
           free variables contained in the other configuration
         
@@ -102,7 +97,6 @@ class Configuration:
 
         assert self.module == other.module and self.function == other.function
         assert len(self.memory_updates) == 0
-        assert len(self.memory_constraints) == 0
         
         if self.current_block != other.current_block:
             return MatchingFailure("unmatched current block")
@@ -168,7 +162,6 @@ class Configuration:
             list(self.path_conditions),
             list(self.memory_updates),
             self.memory_var,
-            list(self.memory_constraints),
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -199,9 +192,6 @@ class Configuration:
             for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
 
-            for memory_constraint in self.memory_constraints:
-                solver.add_assertion(memory_constraint)
-
             # true for sat (i.e. feasible), false for unsat
             return solver.solve()
 
@@ -230,7 +220,7 @@ class Configuration:
                 smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
             )
 
-        self.memory_constraints.append(smt.Equals(new_memory_var, updated_memory_var.simplify()))
+        self.path_conditions.append(smt.Equals(new_memory_var, updated_memory_var.simplify()))
         self.memory_var = new_memory_var
     
     def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:

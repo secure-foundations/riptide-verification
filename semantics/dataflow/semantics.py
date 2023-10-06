@@ -456,12 +456,9 @@ class Configuration:
             for path_condition in self.path_conditions
         )
         
-        return MatchingSuccess(result.substitution, smt.And(
-            result.condition,
-            smt.Implies(
-                smt.And(*other.path_conditions),
-                smt.And(*substituted_path_conditions),
-            ),
+        return MatchingSuccess(result.substitution, smt.Implies(
+            smt.And(*other.path_conditions),
+            smt.And(result.condition, *substituted_path_conditions),
         ))
 
     @staticmethod

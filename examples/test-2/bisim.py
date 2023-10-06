@@ -11,10 +11,10 @@ import semantics.llvm as llvm
 
 def main():
     """
-    See examples/bisim/test-1.png for operator and channel IDs in the dataflow graph
+    See examples/bisim/test-2.png for operator and channel IDs in the dataflow graph
     """
 
-    with open("examples/test-1/test-1.o2p") as dataflow_source:
+    with open("examples/test-2/test-2.o2p") as dataflow_source:
         dfg = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
         # Set up initial config for the dataflow program
@@ -28,16 +28,33 @@ def main():
         # TODO: ignoring memory permissions for now
         dummy_permission = dataflow.PermissionVariable("dummy")
         dataflow_invariant_config = dataflow_init_config.copy()
-        dataflow_invariant_config.operator_states[0].transition_to(dataflow.CarryOperator.pass_b)
+        dataflow_invariant_config.operator_states[1].transition_to(dataflow.CarryOperator.loop)
+        dataflow_invariant_config.operator_states[2].transition_to(dataflow.InvariantOperator.loop)
+        dataflow_invariant_config.operator_states[2].value = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_b_%d")
+
+        dataflow_invariant_config.channel_states[0].pop()
         dataflow_invariant_config.channel_states[1].pop()
         dataflow_invariant_config.channel_states[2].push(
+            dataflow.PermissionedValue(
+                smt.BVConst(1, dataflow.WORD_WIDTH),
+                dummy_permission,
+            ),
+        )
+        dataflow_invariant_config.channel_states[3].pop()
+        dataflow_invariant_config.channel_states[4].push(
             dataflow.PermissionedValue(
                 smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_inc_%d"),
                 dummy_permission,
             ),
         )
+        dataflow_invariant_config.channel_states[5].push(
+            dataflow.PermissionedValue(
+                smt.BVConst(1, dataflow.WORD_WIDTH),
+                dummy_permission,
+            ),
+        )
 
-    with open("examples/test-1/test-1.ll") as llvm_source:
+    with open("examples/test-2/test-2.ll") as llvm_source:
         module = llvm.Parser.parse_module(llvm_source.read())
         function = tuple(module.functions.values())[0]
     
@@ -50,7 +67,9 @@ def main():
             current_instr_counter=0,
             variables=OrderedDict([
                 (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
+                (r"%B", smt.FreshSymbol(smt.BVType(64), "llvm_B_%d")),
                 (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
+                (r"%b", smt.FreshSymbol(smt.BVType(32), "llvm_b_%d")),
                 (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_inc_%d")),
             ]),
             path_conditions=[],
@@ -61,13 +80,13 @@ def main():
     # from llvm_init_config or llvm_invariant_config, we can reach either the end or llvm_invariant_config
     # and further more these states "match with each other"
 
-    dataflow_cut_points = [dataflow_init_config, dataflow_invariant_config]
+    dataflow_cut_points = [
+        (dataflow_init_config, [ 0, 1, 2, 5, 7, 3, 4, 6, 5 ]),
+        (dataflow_invariant_config, [ 1, 2, 5, 7, 3, 4, 6, 5 ]),
+    ]
     llvm_cut_points = [llvm_init_config, llvm_invariant_config]
 
-    # TODO: automatically infer this from the LLVM execution trace
-    some_schedule = [ 0, 4, 0, 1, 3, 2 ]
-
-    for i, (dataflow_cut_point, llvm_cut_point) in enumerate(zip(dataflow_cut_points, llvm_cut_points)):
+    for i, ((dataflow_cut_point, schedule), llvm_cut_point) in enumerate(zip(dataflow_cut_points, llvm_cut_points)):
         print(f"##### trying cut point pair {i} #####")
 
         # configs matched to the invariant config
@@ -82,8 +101,11 @@ def main():
         while len(queue) != 0:
             config, num_steps = queue.pop(0)
 
-            assert num_steps < len(some_schedule), "dataflow execution goes beyond the existing schedule"
-            results = config.step_exhaust(some_schedule[num_steps])
+            if num_steps >= len(schedule):
+                print(config)
+
+            assert num_steps < len(schedule), "dataflow execution goes beyond the existing schedule"
+            results = config.step_exhaust(schedule[num_steps])
 
             for result in results:
                 if isinstance(result, dataflow.NextConfiguration):

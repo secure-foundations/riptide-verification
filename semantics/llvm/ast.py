@@ -67,6 +67,19 @@ class ArrayType(Type):
         return f"[{self.num_elements} x {self.base_type}]"
 
 
+@dataclass
+class FunctionType(Type):
+    return_type: Type
+    parameter_types: Tuple[Type, ...]
+    variable_args: bool
+
+    def __str__(self) -> str:
+        if self.variable_args:
+            return f"{self.return_type} ({', '.join(tuple(map(str, self.parameter_types)) + ('...',))})"
+        else:
+            return f"{self.return_type} ({', '.join(map(str, self.parameter_types))})"
+
+
 class Value(ASTNode):
     def get_type(self) -> Type:
         raise NotImplementedError()
@@ -377,6 +390,27 @@ class StoreInstruction(Instruction):
 
     def get_full_string(self) -> str:
         return f"store {self.base_type}, {self.value}, {self.dest}"
+
+
+@dataclass
+class CallInstruction(Instruction):
+    name: Optional[str] # name of the variable it defines
+    type: FunctionType
+    function_name: str
+    arguments: Tuple[Tuple[Type, Value], ...]
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.arguments = tuple((arg_type, value.resolve_uses(function)) for arg_type, value in self.arguments)
+
+    def get_type(self) -> Type:
+        return self.type.return_type
+
+    def get_full_string(self) -> str:
+        prefix = "" if self.name is None else f"{self.name} = "
+        return prefix + f"call {self.type} {self.function_name}({', '.join(str(value) for _, value in self.arguments)})"
 
 
 @dataclass

@@ -32,6 +32,11 @@ OPERATOR_INFO = {
         "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
+    "ARITH_CFG_OP_GEP": {
+        "dot_label": "+?",
+        "dot_attr": _DOT_CIRCLE_ATTR,
+        **_BINARY_ARITH_PORT_POSITIONS,
+    },
     "ARITH_CFG_OP_GEP2": {
         "dot_label": "+?",
         "dot_attr": _DOT_CIRCLE_ATTR,

@@ -362,6 +362,27 @@ class Configuration:
             
             return NextConfiguration(self), NextConfiguration(other)
 
+        elif isinstance(instr, CallInstruction):
+            # TODO: these implementations are a bit hacky
+            if instr.function_name == "@cgra_load32":
+                assert len(instr.arguments) >= 1
+                self.set_variable(
+                    instr.name,
+                    self.load_memory(self.eval_value(instr.arguments[0][1]), 32),
+                )
+                self.current_instr_counter += 1
+                return NextConfiguration(self),
+
+            elif instr.function_name == "@cgra_store32":
+                assert len(instr.arguments) >= 2
+                self.store_memory(self.eval_value(instr.arguments[1][1]), self.eval_value(instr.arguments[0][1]), 32)
+                self.set_variable(instr.name, smt.BVConst(0, 32))
+                self.current_instr_counter += 1
+                return NextConfiguration(self),
+            
+            else:
+                assert False, f"function {instr.function_name} not implemented"
+
         elif isinstance(instr, PhiInstruction):
             assert self.previous_block in instr.branches, \
                    f"block label {self.current_block} not in the list of phi branches"

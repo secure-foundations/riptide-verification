@@ -71,6 +71,21 @@ class ASTTransformer(Transformer[ASTNode]):
     
     def store_instruction(self, args: List[Any]) -> StoreInstruction:
         return StoreInstruction(args[0], args[1].attach_type(args[0]), args[3].attach_type(args[2]))
+    
+    def call_instruction(self, args: List[CallInstruction]) -> CallInstruction:
+        return args[0]
+
+    def call_instruction_with_return(self, args: List[Any]) -> CallInstruction:
+        return CallInstruction(args[0].name, args[1], args[2].name, args[3])
+    
+    def call_instruction_without_return(self, args: List[Any]) -> CallInstruction:
+        return CallInstruction(None, args[0], args[1].name, args[2])
+
+    def call_arguments(self, args: List[Tuple[Type, Value]]) -> Tuple[Tuple[Type, Value], ...]:
+        return tuple(args)
+
+    def call_argument(self, args: List[Any]) -> Tuple[Type, Value]:
+        return args[0], args[1]
 
     def phi_instruction_branch(self, args: List[Any]) -> PhiBranch:
         return PhiBranch(args[0], args[1])
@@ -115,6 +130,15 @@ class ASTTransformer(Transformer[ASTNode]):
     def array_type(self, args: List[Type]) -> ArrayType:
         return ArrayType(args[1], int(args[0].value))
 
+    def function_type(self, args: List[FunctionType]) -> FunctionType:
+        return args[0]
+
+    def function_type_with_eclipsis(self, args: List[Type]) -> FunctionType:
+        return FunctionType(args[0], tuple(args[1:]), True)
+
+    def function_type_without_eclipsis(self, args: List[Type]) -> FunctionType:
+        return FunctionType(args[0], tuple(args[1:]), False)
+
     def value(self, args: List[UnresolvedValue]) -> UnresolvedValue:
         return args[0]
     
@@ -152,6 +176,9 @@ class Parser:
             | pointer_type
             | array_type
 
+        function_type: type "(" [type ("," type)*] "," "..." ")" -> function_type_with_eclipsis
+                     | type "(" [type ("," type)*] ")" -> function_type_without_eclipsis
+        
         integer_type: INTEGER_TYPE
         pointer_type: type "*"
         array_type: "[" INTEGER "x" type "]"
@@ -173,6 +200,7 @@ class Parser:
                    | getelementptr_instruction
                    | load_instruction
                    | store_instruction
+                   | call_instruction
                    | phi_instruction
                    | jump_instruction
                    | br_instruction
@@ -192,6 +220,11 @@ class Parser:
         load_instruction: variable "=" "load" type "," pointer_type value ["," "align" INTEGER]
 
         store_instruction: "store" type value "," pointer_type value ["," "align" INTEGER]
+
+        call_instruction: variable "=" "call" function_type variable "(" call_arguments ")" -> call_instruction_with_return
+                        | "call" function_type variable "(" call_arguments ")" -> call_instruction_without_return
+        call_arguments: [call_argument ("," call_argument)*]
+        call_argument: type value
 
         phi_instruction: variable "=" "phi" type phi_instruction_branch ("," phi_instruction_branch)*
         phi_instruction_branch: "[" value "," label "]"

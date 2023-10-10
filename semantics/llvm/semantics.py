@@ -34,6 +34,9 @@ class MemoryUpdate:
     value: smt.SMTTerm
     bit_width: int
 
+    def __str__(self) -> str:
+        return f"{self.location} |-> {self.value} ({self.bit_width}-bit)"
+
 
 @dataclass
 class Configuration:
@@ -64,7 +67,7 @@ class Configuration:
 
         lines.append("memory updates:")
         for update in self.memory_updates:
-            lines.append(f"  {update.location} |-> {update.value} ({update.bit_width}-bit)")
+            lines.append(f"  {update}")
 
         lines.append("path conditions:")
         for path_condition in self.path_conditions:

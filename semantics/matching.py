@@ -30,11 +30,12 @@ class MatchingSuccess:
 
     def merge(self, other: MatchingResult) -> MatchingResult:
         if isinstance(other, MatchingFailure):
-            return MatchingFailure(f"failed to merge with other matching failure: {other.reason}")
+            return other
         
         assert isinstance(other, MatchingSuccess)
         assert set(self.substitution.keys()).isdisjoint(set(other.substitution.keys())), \
                f"overlapping keys {set(self.substitution.keys())}, {set(other.substitution.keys())}"
+        
         return MatchingSuccess(
             OrderedDict(tuple(self.substitution.items()) + tuple(other.substitution.items())),
             smt.And(self.condition, other.condition),
@@ -56,6 +57,6 @@ class MatchingFailure:
 
     def merge(self, other: MatchingResult) -> MatchingResult:
         if isinstance(other, MatchingFailure):
-            return MatchingFailure(f"failed to merge two matching failures: {self.reason}; {other.reason}")
+            return MatchingFailure(f"{self.reason}; {other.reason}")
         else:
-            return MatchingFailure(f"failed to merge with a matching failure: {self.reason}")
+            return self

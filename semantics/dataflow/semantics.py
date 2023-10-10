@@ -61,7 +61,7 @@ class Operator:
         if self.current_transition == other.current_transition:
             return MatchingSuccess()
         else:
-            return MatchingFailure()
+            return MatchingFailure(f"unmatched transition at operator {self.pe.id}")
 
 
 @Operator.implement("ARITH_CFG_OP_EQ")
@@ -88,6 +88,12 @@ class MulOperator(Operator):
 class SignedGreaterThanOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.Ite(smt.BVSGT(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
+
+
+@Operator.implement("ARITH_CFG_OP_SLT")
+class SignedLessThanOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.BVSLT(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
 
 
 @Operator.implement("ARITH_CFG_OP_UGT")
@@ -165,18 +171,28 @@ class InvariantOperator(Operator):
     def match(self, other: Operator) -> MatchingResult:
         result = super().match(other)
         assert isinstance(other, InvariantOperator)
-        return result.merge(MatchingResult.match_smt_terms(self.value, other.value))
+        if self.value is None and other.value is None:
+            return result
+        elif (self.value is None) != (other.value is None):
+            return result.merge(MatchingFailure(f"invariant value not matched at operator {self.pe.id}"))
+        else:
+            assert self.value is not None and other.value is not None
+            return result.merge(MatchingResult.match_smt_terms(self.value, other.value))
 
     def start(self, config: Configuration, value: ChannelId(1)) -> ChannelId(0):
         self.transition_to(InvariantOperator.loop)
         self.value = value
         return value
     
+    def clear(self, config: Configuration):
+        self.value = None
+        self.transition_to(InvariantOperator.start)
+
     def loop(self, config: Configuration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
-            return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), InvariantOperator.invariant, InvariantOperator.start)
+            return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), InvariantOperator.invariant, InvariantOperator.clear)
         elif self.pe.pred == "CF_CFG_PRED_TRUE":
-            return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), InvariantOperator.start, InvariantOperator.invariant)
+            return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), InvariantOperator.clear, InvariantOperator.invariant)
         else:
             assert False, f"unknown pred {self.pe.pred}"
 
@@ -350,6 +366,9 @@ class MemoryUpdate:
     index: smt.SMTTerm
     value: smt.SMTTerm
 
+    def __str__(self) -> str:
+        return f"{self.base}[{self.index}] = {self.value}"
+
 
 class StepResult:
     ...
@@ -420,7 +439,7 @@ class Configuration:
 
         # Match channel states
         assert len(self.channel_states) == len(other.channel_states)
-        for self_channel, other_channel in zip(self.channel_states, other.channel_states):
+        for i, (self_channel, other_channel) in enumerate(zip(self.channel_states, other.channel_states)):
             if isinstance(self_channel, WildcardChannelState):
                 ...
                 # TODO: do anything here?
@@ -429,21 +448,21 @@ class Configuration:
                 assert not isinstance(other_channel, WildcardChannelState)
 
                 if self_channel.hold_constant is None != other_channel.hold_constant is None:
-                    return MatchingFailure()
+                    return MatchingFailure(f"unmatched hold constant at channel {i}")
                 
                 if self_channel.hold_constant is None:
                     if len(self_channel.values) != len(other_channel.values):
-                        return MatchingFailure()
+                        return MatchingFailure(f"unmatched channel queue length at channel {i}")
                     else:
                         for self_value, other_value in zip(self_channel.values, other_channel.values):
                             result = result.merge(MatchingResult.match_smt_terms(self_value.term, other_value.term))
                             if isinstance(result, MatchingFailure):
                                 return result
                 else:
-                    result = result.merge(MatchingResult.match_smt_terms(
+                    result = result.merge(MatchingSuccess(condition=smt.Equals(
                         self_channel.hold_constant.term,
                         other_channel.hold_constant.term,
-                    ))
+                    )))
                     if isinstance(result, MatchingFailure):
                         return result
 
@@ -619,7 +638,7 @@ class Configuration:
         
         lines.append(f"memory updates:")
         for update in self.memory_updates:
-            lines.append(f"  {update.base}[{update.index}] = {update.value}")
+            lines.append(f"  {update}")
 
         lines.append(f"path conditions:")
         for constraint in self.path_conditions:

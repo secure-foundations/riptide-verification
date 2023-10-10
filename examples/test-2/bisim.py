@@ -94,7 +94,7 @@ def main():
         matched_llvm_configs = []
 
         final_dataflow_configs = []
-        final_llvm_configs = []  
+        final_llvm_configs = []
         
         # First try executing the dataflow cut point
         queue = [(dataflow_cut_point.copy(), 0)]
@@ -146,25 +146,55 @@ def main():
                 else:
                     assert False, f"unsupported result {result}"
     
-        print("### matched configs")
+        print(f"### matched configs at invariant config")
         for config, match in matched_dataflow_configs:
-            print(config)
+            # print(config)
             assert match.check_condition(), "invalid match"
+            print("===== dataflow start =====")
+            print("memory_updates:")
+            for update in config.memory_updates:
+                print(f"  {update}")
+            print("path conditions:")
+            for path_condition in config.path_conditions:
+                print(f"  {path_condition}")
             print("matching substitution:", match.substitution)
-            # print("matching condition:", match.condition.simplify())
-        
+            print("===== dataflow end =====")
+
         for config, match in matched_llvm_configs:
-            print(config)
+            # print(config)
             assert match.check_condition(), "invalid match"
+            print("===== llvm start =====")
+            print("memory_updates:")
+            for update in config.memory_updates:
+                print(f"  {update}")
+            print("path conditions:")
+            for path_condition in config.path_conditions:
+                print(f"  {path_condition}")
             print("matching substitution:", match.substitution)
+            print("===== llvm end =====")
             # print("matching condition:", match.condition.simplify())
 
         print("### final configs")
         for config in final_dataflow_configs:
-            print(config)
+            print("===== dataflow start =====")
+            print("memory_updates:")
+            for update in config.memory_updates:
+                print(f"  {update}")
+            print("path conditions:")
+            for path_condition in config.path_conditions:
+                print(f"  {path_condition}")
+            print("===== dataflow start =====")
         
         for config in final_llvm_configs:
-            print(config)
+            print("===== llvm start =====")
+            print("memory_updates:")
+            for update in config.memory_updates:
+                print(f"  {update}")
+            print("path conditions:")
+            for path_condition in config.path_conditions:
+                print(f"  {path_condition}")
+            print("===== llvm end =====")
+
 
 if __name__ == "__main__":
     main()

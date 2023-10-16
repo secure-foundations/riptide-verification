@@ -82,7 +82,7 @@ class ASTTransformer(Transformer[ASTNode]):
         return CallInstruction(None, args[0], args[1].name, args[2])
 
     def call_arguments(self, args: List[Tuple[Type, Value]]) -> Tuple[Tuple[Type, Value], ...]:
-        return tuple(args)
+        return tuple((typ, value.attach_type(typ)) for typ, value in args)
 
     def call_argument(self, args: List[Any]) -> Tuple[Type, Value]:
         return args[0], args[1]
@@ -150,6 +150,9 @@ class ASTTransformer(Transformer[ASTNode]):
     
     def null_value(self, args: List[Token]) -> UnresolvedNullValue:
         return UnresolvedNullValue()
+    
+    def undef_value(self, args: List[Token]) -> UnresolvedUndefValue:
+        return UnresolvedUndefValue()
 
 
 class Parser:
@@ -241,6 +244,7 @@ class Parser:
         value: INTEGER -> integer_value
              | "null" -> null_value
              | variable
+             | "undef" -> undef_value
 
         /////////////////////////////////////////////////////
         // The portion of the syntax below will be ignored //

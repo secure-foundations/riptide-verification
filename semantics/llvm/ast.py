@@ -5,7 +5,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 
-WORD_WIDTH = 64
+WORD_WIDTH = 32 # addresses are 32-bit
 BYTE_WIDTH = 8
 
 
@@ -170,6 +170,11 @@ class UnresolvedNullValue(UnresolvedValue):
     def attach_type(self, typ: Type) -> NullConstant:
         assert isinstance(typ, PointerType)
         return NullConstant(typ.base_type)
+    
+
+class UnresolvedUndefValue(UnresolvedValue):
+    def attach_type(self, typ: Type) -> UndefConstant:
+        return UndefConstant(typ)
 
 
 # Unresolved variable use
@@ -215,6 +220,17 @@ class NullConstant(Constant):
 
     def __str__(self) -> str:
         return f"{self.base_type}* null"
+
+
+@dataclass
+class UndefConstant(Constant):
+    type: Type
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} undef"
 
 
 class Instruction(Value):

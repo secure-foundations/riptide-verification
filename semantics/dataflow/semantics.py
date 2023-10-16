@@ -13,7 +13,7 @@ from . import permission
 from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgument
 
 
-WORD_WIDTH = 64
+WORD_WIDTH = 32
 
 
 TransitionFunction = Callable[..., Any]
@@ -77,6 +77,12 @@ class AddOperator(Operator):
         return smt.BVAdd(a, b)
     
 
+@Operator.implement("ARITH_CFG_OP_GEP")
+class GEPOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVAdd(a, b)
+    
+
 @Operator.implement("MUL_CFG_OP_MUL")
 class MulOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
@@ -114,9 +120,11 @@ class SelectOperator(Operator):
         return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), SelectOperator.false, SelectOperator.true)
     
     def true(self, config: Configuration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
+        self.transition_to(SelectOperator.start)
         return a
 
     def false(self, config: Configuration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
+        self.transition_to(SelectOperator.start)
         return b
 
 
@@ -452,7 +460,7 @@ class Configuration:
                 
                 if self_channel.hold_constant is None:
                     if len(self_channel.values) != len(other_channel.values):
-                        return MatchingFailure(f"unmatched channel queue length at channel {i}")
+                        return MatchingFailure(f"unmatched channel queue length at channel {i} ({len(self_channel.values)} vs {len(other_channel.values)})")
                     else:
                         for self_value, other_value in zip(self_channel.values, other_channel.values):
                             result = result.merge(MatchingResult.match_smt_terms(self_value.term, other_value.term))
@@ -537,7 +545,7 @@ class Configuration:
 
     @staticmethod
     def get_fresh_memory_var() -> smt.SMTTerm:
-        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)))
+        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)), "dataflow_mem_%d")
 
     def copy(self) -> Configuration:
         return Configuration(
@@ -734,17 +742,21 @@ class Configuration:
         # If the operation is a store or load
         # Add additional permission constraint of read/write A <= input permissions
         if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
-            # TODO: right now we assume that the base is always one of the free variables
-            assert isinstance(pe_info.inputs[0].constant, FunctionArgument)
-            var_name = pe_info.inputs[0].constant.variable_name
-            assert var_name in self.free_vars
+            if isinstance(pe_info.inputs[0].constant, FunctionArgument):
 
-            if isinstance(operator_state, LoadOperator):
-                mem_permission = permission.ReadPermission(var_name)
+                # TODO: right now we assume that the base is always one of the free variables
+                assert isinstance(pe_info.inputs[0].constant, FunctionArgument)
+                var_name = pe_info.inputs[0].constant.variable_name
+                assert var_name in self.free_vars
+
+                if isinstance(operator_state, LoadOperator):
+                    mem_permission = permission.ReadPermission(var_name)
+                else:
+                    mem_permission = permission.WritePermission(var_name)
+                
+                self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:
-                mem_permission = permission.WritePermission(var_name)
-            
-            self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
+                print("FIXME: unsupported store/load")
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"internal-{pe_info.id}-")

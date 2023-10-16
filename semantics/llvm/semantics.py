@@ -138,7 +138,7 @@ class Configuration:
 
         for parameter in function.parameters.values():
             # TODO: right now this only supports pointers and integers
-            variables[parameter.name] = smt.FreshSymbol(smt.BVType(parameter.get_type().get_bit_width()))
+            variables[parameter.name] = smt.FreshSymbol(smt.BVType(parameter.get_type().get_bit_width()), "llvm_param_" + parameter.name.replace(".", "_").strip("%") + "_%d")
 
         return Configuration(
             module=module,
@@ -152,7 +152,8 @@ class Configuration:
     
     @staticmethod
     def get_fresh_memory_var() -> smt.SMTTerm:
-        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(BYTE_WIDTH)))
+        # return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(BYTE_WIDTH)))
+        return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)), "llvm_mem_%d")
 
     def copy(self) -> Configuration:
         return Configuration(
@@ -204,26 +205,31 @@ class Configuration:
         Location should be a BV of width WORD_WIDTH
         """
 
+        assert bit_width == WORD_WIDTH, f"unsupported memory write of {bit_width} bit"
+
         self.memory_updates.append(MemoryUpdate(location, value, bit_width))
 
-        # Align bit_width to BYTE_WIDTH
-        aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
-        increase = aligned_bit_width - bit_width
+        # # Align bit_width to BYTE_WIDTH
+        # aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
+        # increase = aligned_bit_width - bit_width
 
-        extended_value = smt.BVZExt(value, increase)
+        # extended_value = smt.BVZExt(value, increase)
+
+        # new_memory_var = Configuration.get_fresh_memory_var()
+        # updated_memory_var = self.memory_var
+
+        # for i in range(aligned_bit_width // BYTE_WIDTH):
+        #     # store the ith byte to dest + i
+        #     updated_memory_var = smt.Store(
+        #         updated_memory_var,
+        #         smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
+        #         smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
+        #     )
 
         new_memory_var = Configuration.get_fresh_memory_var()
-        updated_memory_var = self.memory_var
+        updated_memory = smt.Store(self.memory_var, location, value)
 
-        for i in range(aligned_bit_width // BYTE_WIDTH):
-            # store the ith byte to dest + i
-            updated_memory_var = smt.Store(
-                updated_memory_var,
-                smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
-                smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
-            )
-
-        self.path_conditions.append(smt.Equals(new_memory_var, updated_memory_var.simplify()))
+        self.path_conditions.append(smt.Equals(new_memory_var, updated_memory.simplify()))
         self.memory_var = new_memory_var
     
     def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:
@@ -231,19 +237,22 @@ class Configuration:
         Load a BV of width bit_width starting from the `location`
         """
 
+        assert bit_width == WORD_WIDTH, f"unsupported memory read of bit width {bit_width}"
         assert bit_width > 0
 
-        aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
-        increase = aligned_bit_width - bit_width
+        # aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
+        # increase = aligned_bit_width - bit_width
 
-        read_bytes = (
-            smt.Select(self.memory_var, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
-            for i in range(aligned_bit_width // BYTE_WIDTH)
-        )
+        # read_bytes = (
+        #     smt.Select(self.memory_var, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
+        #     for i in range(aligned_bit_width // BYTE_WIDTH)
+        # )
         
-        value = smt.BVConcat(*read_bytes)
+        # value = smt.BVConcat(*read_bytes)
 
-        return smt.BVExtract(value, 0, bit_width - 1).simplify()
+        # return smt.BVExtract(value, 0, bit_width - 1).simplify()
+
+        return smt.Select(self.memory_var, location)
 
     def step(self) -> Tuple[StepResult, ...]:
         """
@@ -281,7 +290,7 @@ class Configuration:
                 )
             
             elif instr.cond == "sgt":
-                result = smt.BVSGE(
+                result = smt.BVSGT(
                     self.eval_value(instr.left),
                     self.eval_value(instr.right),
                 )
@@ -306,24 +315,28 @@ class Configuration:
             index = instr.indices[0]
 
             element_bit_width = instr.base_type.get_bit_width()
-            aligned_element_byte_count = (element_bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH
-
-            index_value = self.eval_value(index)
             index_bit_width = index.get_type().get_bit_width()
 
-            assert index_bit_width <= WORD_WIDTH
-            if index_bit_width < WORD_WIDTH:
-                index_value = smt.BVSExt(index_value, WORD_WIDTH - index_bit_width)
+            assert element_bit_width == index_bit_width == WORD_WIDTH, "unsupported"
 
-            pointer = smt.BVAdd(
-                pointer,
-                smt.BVMul(
-                    smt.BVConst(aligned_element_byte_count, WORD_WIDTH),
-                    index_value,
-                ),
-            )
+            # aligned_element_byte_count = (element_bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH
 
-            self.set_variable(instr.name, pointer)
+            # index_value = self.eval_value(index)
+            # index_bit_width = index.get_type().get_bit_width()
+
+            # assert index_bit_width <= WORD_WIDTH
+            # if index_bit_width < WORD_WIDTH:
+            #     index_value = smt.BVSExt(index_value, WORD_WIDTH - index_bit_width)
+
+            # pointer = smt.BVAdd(
+            #     pointer,
+            #     smt.BVMul(
+            #         smt.BVConst(aligned_element_byte_count, WORD_WIDTH),
+            #         index_value,
+            #     ),
+            # )
+
+            self.set_variable(instr.name, smt.BVAdd(pointer, self.eval_value(index)))
             self.current_instr_counter += 1
 
             return NextConfiguration(self),
@@ -379,7 +392,7 @@ class Configuration:
             elif instr.function_name == "@cgra_store32":
                 assert len(instr.arguments) >= 2
                 self.store_memory(self.eval_value(instr.arguments[1][1]), self.eval_value(instr.arguments[0][1]), 32)
-                self.set_variable(instr.name, smt.BVConst(0, 32))
+                self.set_variable(instr.name, smt.BVConst(1, 32))
                 self.current_instr_counter += 1
                 return NextConfiguration(self),
             

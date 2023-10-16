@@ -19,7 +19,7 @@ def main():
         
         # Set up initial config for the dataflow program
         free_vars: Dict[str, smt.SMTTerm] = {
-            function_arg.variable_name: smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_{function_arg.variable_name}_%d")
+            function_arg.variable_name: smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_param_{function_arg.variable_name}_%d")
             for function_arg in dfg.function_arguments
         }
         dataflow_init_config = dataflow.Configuration.get_initial_configuration(dfg, free_vars)
@@ -52,13 +52,13 @@ def main():
         )
         dataflow_outer_2_config.channel_states[27].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_inc_i_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_inc_i_%d"),
                 dummy_permission,
             ),
         )
         dataflow_outer_2_config.channel_states[6].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_lso_alloc1_0_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_lso_alloc1_0_%d"),
                 dummy_permission,
             ),
         )
@@ -70,7 +70,7 @@ def main():
         dataflow_inner_2_config.operator_states[17].transition_to(dataflow.CarryOperator.loop)
         
         dataflow_inner_2_config.operator_states[4].transition_to(dataflow.InvariantOperator.loop)
-        dataflow_inner_2_config.operator_states[4].value = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_i_0_%d")
+        dataflow_inner_2_config.operator_states[4].value = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_i_0_%d")
 
         dataflow_inner_2_config.channel_states[26].pop()
         dataflow_inner_2_config.channel_states[5].pop()
@@ -107,20 +107,20 @@ def main():
         )
         dataflow_inner_2_config.channel_states[13].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_1_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_1_%d"),
                 dummy_permission,
             ),
         )
         # TODO: needs a path condition to say this is equal to dataflow_inner_2_config.operator_states[4].value
         dataflow_inner_2_config.channel_states[21].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_i_0_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_i_0_%d"),
                 dummy_permission,
             ),
         )
         dataflow_inner_2_config.channel_states[41].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_inc_j_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_inc_j_%d"),
                 dummy_permission,
             ),
         )
@@ -168,8 +168,8 @@ def main():
         #     previous_block="entry",
         #     current_instr_counter=0,
         #     variables=OrderedDict([
-        #         (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
-        #         (r"%B", smt.FreshSymbol(smt.BVType(64), "llvm_B_%d")),
+        #         (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_A_%d")),
+        #         (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_B_%d")),
         #         (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
         #     ]),
         #     path_conditions=[],
@@ -182,11 +182,11 @@ def main():
             previous_block="outer.cleanup",
             current_instr_counter=0,
             variables=OrderedDict([
-                (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
-                (r"%B", smt.FreshSymbol(smt.BVType(64), "llvm_B_%d")),
-                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
-                (r"%lso.alloc1.1.lcssa", smt.FreshSymbol(smt.BVType(32), "llvm_lso_alloc1_1_lcssa_%d")),
-                (r"%inc.i", smt.FreshSymbol(smt.BVType(32), "llvm_inc_i_%d")),
+                (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
+                (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
+                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
+                (r"%lso.alloc1.1.lcssa", smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc1_1_lcssa_%d")),
+                (r"%inc.i", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_i_%d")),
             ]),
             path_conditions=[],
         )
@@ -198,8 +198,8 @@ def main():
         #     previous_block="outer.body",
         #     current_instr_counter=0,
         #     variables=OrderedDict([
-        #         (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
-        #         (r"%B", smt.FreshSymbol(smt.BVType(64), "llvm_B_%d")),
+        #         (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_A_%d")),
+        #         (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_B_%d")),
         #         (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
         #         (r"%lso.alloc1.0", smt.FreshSymbol(smt.BVType(32), "llvm_lso_alloc1_0_%d")),
         #         (r"%i", smt.FreshSymbol(smt.BVType(32), "llvm_i_%d")),
@@ -214,12 +214,12 @@ def main():
             previous_block="inner.body",
             current_instr_counter=0,
             variables=OrderedDict([
-                (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
-                (r"%B", smt.FreshSymbol(smt.BVType(64), "llvm_B_%d")),
-                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
-                (r"%1", smt.FreshSymbol(smt.BVType(32), "llvm_1_%d")),
-                (r"%inc.j", smt.FreshSymbol(smt.BVType(32), "llvm_inc_j_%d")),
-                (r"%i", smt.FreshSymbol(smt.BVType(32), "llvm_i_%d")),
+                (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_A_%d")),
+                (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_B_%d")),
+                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
+                (r"%1", smt.FreshSymbol(smt.BVType(32), "llvm_var_1_%d")),
+                (r"%inc.j", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_j_%d")),
+                (r"%i", smt.FreshSymbol(smt.BVType(32), "llvm_var_i_%d")),
             ]),
             path_conditions=[],
         )
@@ -277,9 +277,7 @@ def main():
     ]
 
     for i, ((dataflow_cut_point, schedule), llvm_cut_point) in enumerate(zip(dataflow_cut_points, llvm_cut_points)):
-        # if i == 2:
-        #     continue
-        
+
         print(f"##### trying cut point pair {i} #####")
 
         # configs matched to the invariant config

@@ -19,7 +19,7 @@ def main():
         
         # Set up initial config for the dataflow program
         free_vars: Dict[str, smt.SMTTerm] = {
-            function_arg.variable_name: smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_{function_arg.variable_name}_%d")
+            function_arg.variable_name: smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_param_{function_arg.variable_name}_%d")
             for function_arg in dfg.function_arguments
         }
         dataflow_init_config = dataflow.Configuration.get_initial_configuration(dfg, free_vars)
@@ -32,7 +32,7 @@ def main():
         dataflow_invariant_config.channel_states[1].pop()
         dataflow_invariant_config.channel_states[2].push(
             dataflow.PermissionedValue(
-                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_inc_%d"),
+                smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_inc_%d"),
                 dummy_permission,
             ),
         )
@@ -49,9 +49,9 @@ def main():
             previous_block="body",
             current_instr_counter=0,
             variables=OrderedDict([
-                (r"%A", smt.FreshSymbol(smt.BVType(64), "llvm_A_%d")),
-                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_len_%d")),
-                (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_inc_%d")),
+                (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
+                (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
+                (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_%d")),
             ]),
             path_conditions=[],
         )

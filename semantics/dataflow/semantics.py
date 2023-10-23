@@ -689,6 +689,21 @@ class Configuration:
                 assert False, f"unexpected step result {result}"
 
         return tuple(final_results)
+    
+    def is_fireable(self, pe_id: int) -> bool:
+        pe_info = self.graph.vertices[pe_id]
+        operator_state = self.operator_states[pe_info.id]
+        transition = operator_state.current_transition
+        input_channel_ids = self.get_transition_input_channels(pe_info, transition)
+
+        # Check for input channel availability
+        # print(f"{pe_info.id} {input_channel_ids}")
+        for channel_id in input_channel_ids:
+            if not self.channel_states[channel_id].ready():
+                # Channel not ready
+                return False
+            
+        return True
 
     def step(self, pe_id: int) -> Tuple[StepResult, ...]:
         """
@@ -699,19 +714,11 @@ class Configuration:
         
         pe_info = self.graph.vertices[pe_id]
         operator_state = self.operator_states[pe_info.id]
-
         transition = operator_state.current_transition
-        
         input_channel_ids = self.get_transition_input_channels(pe_info, transition)
 
-        # Check for input channel availability
-        # print(f"{pe_info.id} {input_channel_ids}")
-        for channel_id in input_channel_ids:
-            if not self.channel_states[channel_id].ready():
-                # Channel not ready
-                return ()
-
-        # print("triggering", str(pe_info.id))
+        if not self.is_fireable(pe_id):
+            return ()
 
         # TODO: when channels are bounded, check for output channel availability here
 
@@ -756,7 +763,7 @@ class Configuration:
                 
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:
-                print("FIXME: unsupported store/load")
+                print("FIXME: unsupported permission for store/load")
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"internal-{pe_info.id}-")

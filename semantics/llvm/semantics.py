@@ -52,8 +52,7 @@ class Configuration:
 
     # For book keeping purposes
     memory_updates: List[MemoryUpdate] = field(default_factory=list)
-
-    memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
+    memory: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
 
     def __str__(self) -> str:
         lines = []
@@ -122,6 +121,7 @@ class Configuration:
 
         assert isinstance(result, MatchingSuccess)
 
+        # TODO: this is ignoring memory constraints
         substituted_path_conditions = (
             path_condition.substitute(result.substitution)
             for path_condition in self.path_conditions
@@ -165,7 +165,7 @@ class Configuration:
             dict(self.variables),
             list(self.path_conditions),
             list(self.memory_updates),
-            self.memory_var,
+            self.memory,
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -195,7 +195,6 @@ class Configuration:
         with smt.Solver(name="z3") as solver:
             for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
-
             # true for sat (i.e. feasible), false for unsat
             return solver.solve()
 
@@ -208,6 +207,7 @@ class Configuration:
         assert bit_width == WORD_WIDTH, f"unsupported memory write of {bit_width} bit"
 
         self.memory_updates.append(MemoryUpdate(location, value, bit_width))
+        self.memory = smt.Store(self.memory, location, value)
 
         # # Align bit_width to BYTE_WIDTH
         # aligned_bit_width = (bit_width + BYTE_WIDTH - 1) // BYTE_WIDTH * BYTE_WIDTH
@@ -225,12 +225,6 @@ class Configuration:
         #         smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
         #         smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
         #     )
-
-        new_memory_var = Configuration.get_fresh_memory_var()
-        updated_memory = smt.Store(self.memory_var, location, value)
-
-        self.path_conditions.append(smt.Equals(new_memory_var, updated_memory.simplify()))
-        self.memory_var = new_memory_var
     
     def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:
         """
@@ -252,7 +246,7 @@ class Configuration:
 
         # return smt.BVExtract(value, 0, bit_width - 1).simplify()
 
-        return smt.Select(self.memory_var, location)
+        return smt.Select(self.memory, location)
 
     def step(self) -> Tuple[StepResult, ...]:
         """

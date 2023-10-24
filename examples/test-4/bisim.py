@@ -70,13 +70,13 @@ def run_dataflow_until_branch(
         results = config.step_exhaust(pe_id)
 
         if len(results) == 1:
-            print(f"stepped on pe {pe_id}")
+            # print(f"stepped on pe {pe_id}")
             assert isinstance(results[0], dataflow.NextConfiguration)
             config = results[0].config
             updated = True
         
         elif len(results) > 1:
-            print(f"branched on pe {pe_id}")
+            # print(f"branched on pe {pe_id}")
             # branching, return immediately
             return results
         
@@ -90,6 +90,24 @@ def run_dataflow_until_branch(
 
 def is_steer_inv(pe: dataflow.ProcessingElement) -> bool:
     return pe.operator == "CF_CFG_OP_STEER" or pe.operator == "CF_CFG_OP_INVARIANT"
+
+
+def check_implication(a: Iterable[smt.SMTTerm], b: Iterable[smt.SMTTerm]) -> bool:
+    # print("implication!!!")
+    with smt.Solver(name="z3") as solver:
+        for term in a:
+            # print(term)
+            solver.add_assertion(term)
+
+        # for term in b:
+            # print("=>", term)
+        solver.add_assertion(smt.Not(smt.And(*b)))
+
+        # unsat => implication valid
+        result = not solver.solve()
+        # print(result)
+
+        return result
 
 
 def run_dataflow_with_schedule(
@@ -121,27 +139,10 @@ def run_dataflow_with_schedule(
         if is_steer_inv(pe)
     )
 
-    def check_implication(a: Iterable[smt.SMTTerm], b: Iterable[smt.SMTTerm]) -> bool:
-        # print("implication!!!")
-        with smt.Solver(name="z3") as solver:
-            for term in a:
-                # print(term)
-                solver.add_assertion(term)
-
-            # for term in b:
-                # print("=>", term)
-            solver.add_assertion(smt.Not(smt.And(*b)))
-
-            # unsat => implication valid
-            result = not solver.solve()
-            # print(result)
-
-            return result
-
     def branch(results: Tuple[dataflow.StepResult, ...], new_trace_counter: int):
         assert len(results) == 2
 
-        print("branching!!!")
+        # print("branching!!!")
 
         first_branch: List[LLVMExecutionBranch] = []
         second_branch: List[LLVMExecutionBranch] = []
@@ -161,14 +162,15 @@ def run_dataflow_with_schedule(
             ):
                 second_branch.append(branch)
             else:
-                assert False, f"bad branch on condition {results[0].config.path_conditions[-1]}"
+                # print(correspondence_equations)
+                assert False, f"bad branch on condition {results[1].config.path_conditions}; cannot determine which branch this path condition belongs to: {branch.config.path_conditions}"
 
         # print(len(first_branch), len(second_branch))
 
         assert len(first_branch) > 0
         assert len(second_branch) > 0
 
-        print("next counter", new_trace_counter)
+        # print("next counter", new_trace_counter)
 
         return run_dataflow_with_schedule(results[0].config, first_branch, correspondence, new_trace_counter) + \
                run_dataflow_with_schedule(results[1].config, second_branch, correspondence, new_trace_counter)
@@ -200,12 +202,14 @@ def run_dataflow_with_schedule(
         if position not in llvm_position_to_pe_id:
             # might have been coalesced into other PEs
             trace_counter += 1
-            print("skipping", position)
+            # print("skipping", position)
             continue
         pe_id_at_position = llvm_position_to_pe_id[position]
         results = run_dataflow_until_branch(config, (pe_id_at_position,))
+        # print(f"firing trace index {trace_counter} ({position}, PE {pe_id_at_position})")
         if len(results) == 0:
-            assert False, f"trace index {trace_counter} not fireable"
+            # print(config)
+            assert False, f"trace index {trace_counter} ({position}, PE {pe_id_at_position}) not fireable"
         elif len(results) > 1:
             return branch(results, trace_counter + 1)
         else:
@@ -307,9 +311,23 @@ def generalize_dataflow_config(
         # If the destination is a carry, we need to simplify the decider condition to True
         if dest_pe.operator == "CF_CFG_OP_CARRY" and channel.destination_port == 0:
             # TODO: check if the channel value is always true under path condition
+            # print(config.path_conditions)
+            decider_term = config.channel_states[channel_id].peek().term
+
+            if check_implication(config.path_conditions, [
+                smt.Equals(decider_term, smt.BVConst(1, dataflow.WORD_WIDTH))
+            ]):
+                decider_value = smt.BVConst(1, dataflow.WORD_WIDTH)
+            elif check_implication(config.path_conditions, [
+                smt.Equals(decider_term, smt.BVConst(0, dataflow.WORD_WIDTH))
+            ]):
+                decider_value = smt.BVConst(0, dataflow.WORD_WIDTH)
+            else:
+                assert False, f"cannot determine the decider value {decider_term} from path conditions {config.path_conditions}"
+
             init_config.channel_states[channel_id].push(
                 dataflow.PermissionedValue(
-                    smt.BVConst(1, dataflow.WORD_WIDTH),
+                    decider_value,
                     dummy_permission,
                 ),
             )
@@ -412,6 +430,7 @@ def main():
     
         llvm_init_config = llvm.Configuration.get_initial_configuration(module, function)
 
+        # llvm_var_lso_alloc2_1_lcssa = smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_lcssa_%d")
         llvm_outer_config = llvm.Configuration(
             module,
             function,
@@ -423,6 +442,7 @@ def main():
                 (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
                 (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
                 (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")),
+                (r"%lso.alloc2.1", smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_%d")), # TODO: figure out how to generate this
                 (r"%lso.alloc2.1.lcssa", smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_lcssa_%d")),
                 (r"%inc8", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc8_%d")),
             ]),
@@ -481,8 +501,8 @@ def main():
 
     dataflow_cut_points = [
         dataflow_init_config,
-        dataflow_outer_config,
-        dataflow_inner_config,
+        None,
+        None,
     ]
 
     llvm_cut_points = [
@@ -491,77 +511,26 @@ def main():
         llvm_inner_config,
     ]
 
+    # correspondence between LLVM variables and dataflow variables (excluding parameters)
+    var_correspondence = [
+        (),
+        None, # to be inferred
+        None, # to be inferred
+    ]
+
+    num_cut_points = len(llvm_cut_points)
+
     # matched_llvm_configs[i][j]: configs matched to i starting from j
-    matched_llvm_configs = { i: { j: [] for j in range(len(llvm_cut_points)) } for i in range(len(llvm_cut_points)) }
+    matched_llvm_configs = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
     # final_llvm_configs[i]: final configs starting from i
-    final_llvm_configs = { i: [] for i in range(len(llvm_cut_points)) }
+    final_llvm_configs = { i: [] for i in range(num_cut_points) }
+
+    matched_dataflow_configs = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
+    final_dataflow_configs = { i: [] for i in range(num_cut_points) }
 
     for i, llvm_cut_point in enumerate(llvm_cut_points):
         print(f"##### trying cut point pair {i} #####")
-
-        # configs matched to the invariant config
-
-        # cut point index |-> configs matched to the cut point
-        # matched_dataflow_configs = { i: [] for i in range(len(dataflow_cut_points)) }
-        # matched_llvm_configs = { i: [] for i in range(len(llvm_cut_points)) }
-
-        # final_dataflow_configs = []
-        # final_llvm_configs = []
-
-        # First try executing the dataflow cut point
-        # queue = [(dataflow_cut_point.copy(), 0)]
-        # while len(queue) != 0:
-        #     config, num_steps = queue.pop(0)
-
-        #     if num_steps >= len(schedule):
-        #         print(config)
-
-        #     assert num_steps < len(schedule), "dataflow execution goes beyond the existing schedule"
-            
-        #     # if num_steps == 16:
-        #     #     print(config)
-
-        #     next_operator = schedule[num_steps]
-
-        #     if isinstance(next_operator, tuple):
-        #         for op in next_operator:                
-        #             results = config.copy().step_exhaust(op)
-        #             if len(results) != 0:
-        #                 break
-        #     else:
-        #         results = config.step_exhaust(next_operator)
-   
-        #     # print(f"[dataflow] === trying config after step {num_steps} (|next configs| = {len(results)})")
-
-        #     for result in results:
-        #         if isinstance(result, dataflow.NextConfiguration):
-        #             # if num_steps == 10:
-        #             #     print(result.config)
-
-        #             # if num_steps == 15:
-        #             #     print(result.config)
-        #             # print(result.config.channel_states[25])
-
-        #             for j, (dataflow_cut_point, _) in enumerate(dataflow_cut_points):
-        #                 # print(f"[dataflow] trying to match with cut point {j}")
-        #                 match = dataflow_cut_point.match(result.config)
-        #                 if isinstance(match, MatchingSuccess):
-        #                     print(f"[dataflow] !!! found a matched config at step {num_steps + 1} to cut point {j}")
-        #                     # TODO: check match condition here
-        #                     matched_dataflow_configs[j].append((result.config, match))
-        #                     break
-        #                 # print(f"[dataflow] matching failed: {match.reason}")
-        #             else:
-        #                 queue.append((result.config, num_steps + 1))
-
-        #         elif isinstance(result, dataflow.StepException):
-        #             assert False, f"got exception: {result.reason}"
-
-        #     if len(results) == 0:
-        #         print(f"[dataflow] !!! found a final config at step {num_steps}")
-        #         final_dataflow_configs.append(config)
-
-        # Then try the llvm cut point
+    
         queue = [
             LLVMExecutionBranch(llvm_cut_point.copy(), ()),
         ]
@@ -590,166 +559,110 @@ def main():
                 else:
                     assert False, f"unsupported result {result}"
 
-    # for i in range(1, len(llvm_cut_points)):
-    #     print(f"### [dataflow] generating cut point {i} ###")
-    #     # TODO: here we assume the carry and invariant gate states are already set
+    # for function_arg in dfg.function_arguments
 
-    #     for channel in dfg.channels:
-    #         # hold constant channel should always have the same state
-    #         if channel.hold and channel.constant is not None:
-    #             continue
-            
-    #         dest_operator = dfg.vertices[channel.destination]
+    def mirro_llvm_cut_point(cut_point_index: int):
+        llvm_cut_point = llvm_cut_points[cut_point_index]
+        dataflow_cut_point = dataflow_cut_points[cut_point_index]
 
-    #         if channel.constant is not None:
-    #             assert dest_operator.llvm_position is not None
+        # Find all LLVM branches from the specified cut point
+        llvm_branches = [
+            branch
+            for i in range(num_cut_points)
+            for branch, _ in matched_llvm_configs[i][cut_point_index]
+        ] + final_llvm_configs[cut_point_index]
 
-    #             consumed = None
-    #             # check if the dest operator is ever executed in any cut point matches TO i
-    #             for j in range(len(llvm_cut_points)):
-    #                 for branch, match in matched_llvm_configs[i][j]:
-    #                     if dest_operator.llvm_position in branch.trace:
-    #                         set_consumed = True
-    #                     else:
-    #                         set_consumed = False
+        llvm_branch_to_cut_point_index = {
+            id(branch): i
+            for i in range(num_cut_points)
+            for branch, _ in matched_llvm_configs[i][cut_point_index]
+        }
 
-    #                     if consumed is None:
-    #                         consumed = set_consumed
-    #                     else:
-    #                         assert consumed == set_consumed, f"inconsistent constant usage for channel {channel.id}"
+        param_correspondence = tuple(
+            (dataflow_free_vars[function_arg.variable_name], llvm_cut_point.variables["%" + function_arg.variable_name])
+            for function_arg in dfg.function_arguments
+        )
 
-    #             if consumed:
-    #                 # pop constant if all matched config at cut point i consumes this constant
-    #                 dataflow_cut_points[i].channel_states[channel.id].pop()
-    #                 print(f"constant channel {channel.id} popped")
-    #             else:
-    #                 print(f"constant channel {channel.id} not popped")
-                
-    #             continue
+        mem_correspondence = (dataflow_cut_point.memory, llvm_cut_point.memory),
 
-    #         # otherwise there should always be a source operator
-    #         source_operator = dfg.vertices[channel.source]
+        matched_branches = run_dataflow_with_schedule(
+            dataflow_cut_point.copy(),
+            llvm_branches,
+            param_correspondence + var_correspondence[cut_point_index] + mem_correspondence,
+        )
 
-    #         # non-constant channels should be empty in the init state,
-    #         # otherwise this channel is already prepared in some preprocessing stage
-    #         # so we don't overwrite that
-    #         if dataflow_cut_points[i].channel_states[channel.id].ready():
-    #             continue
+        for llvm_branch, dataflow_branch in matched_branches:
+            if id(llvm_branch) in llvm_branch_to_cut_point_index:
+                target_cut_point_index = llvm_branch_to_cut_point_index[id(llvm_branch)]
+                matched_dataflow_configs[target_cut_point_index][cut_point_index].append(dataflow_branch)
 
-    #         if dest_operator.llvm_position is not None:
-    #             # find the true source operator (skipping any steer gates and inv gates that are not ready)
-                
-    #             while True:
-    #                 if source_operator.operator == "CF_CFG_OP_STEER":
-    #                     prev_source = source_operator.inputs[1].source
-    #                     assert prev_source is not None
-    #                     source_operator = dfg.vertices[prev_source]
+                # Infer the target dataflow cut point
+                if dataflow_cut_points[target_cut_point_index] is None:
+                    print(f"inferring dataflow cut point {target_cut_point_index} using a dataflow trace from cut point {cut_point_index}")
+                    target_dataflow_cut_point, target_llvm_var_to_dataflow_var = generalize_dataflow_config(function, dataflow_init_config, dataflow_branch)
+                    print(target_dataflow_cut_point)
+                    target_var_correspondence = tuple(
+                        (dataflow_smt_var, llvm_cut_points[target_cut_point_index].variables[llvm_var])
+                        for llvm_var, dataflow_smt_vars in target_llvm_var_to_dataflow_var.items()
+                        for dataflow_smt_var in dataflow_smt_vars
+                    )
+                    print(target_var_correspondence)
 
-    #                 elif source_operator.operator == "CF_CFG_OP_INVARIANT":
-    #                     prev_source = source_operator.inputs[1].source
-    #                     assert prev_source is not None
-    #                     source_operator = dfg.vertices[prev_source]
+                    dataflow_cut_points[target_cut_point_index] = target_dataflow_cut_point
+                    var_correspondence[target_cut_point_index] = target_var_correspondence
 
-    #                 else:
-    #                     break
+            else:
+                final_dataflow_configs[cut_point_index].append(dataflow_branch)
 
-    #             assert source_operator.llvm_position is not None
+    mirro_llvm_cut_point(0)
+    mirro_llvm_cut_point(2)
+    mirro_llvm_cut_point(1)
 
-    #             # check if the source operator (modulo any steer/inv gates) is ever executed in any cut point matches to i
-    #             source_have_executed = None
-    #             for j in range(len(llvm_cut_points)):
-    #                 for branch, match in matched_llvm_configs[j][i]:
-    #                     if dest_operator.llvm_position in branch.trace:
-    #                         set_source_have_executed = True
-    #                     else:
-    #                         set_source_have_executed = False
+    # llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][0] ] +\
+    #                           final_llvm_configs[0]
 
-    #                     if source_have_executed is None:
-    #                         source_have_executed = set_source_have_executed
-    #                     else:
-    #                         assert source_have_executed == set_source_have_executed, \
-    #                                f"inconsistent source operator usage for channel {channel.id}"
-            
-    #             # check if the dest operator is ever executed in any cut point matches STARTING FROM i
-    #             dest_will_execute = None
-    #             for j in range(len(llvm_cut_points)):
-    #                 for branch, match in matched_llvm_configs[j][i]:
-    #                     if dest_operator.llvm_position in branch.trace:
-    #                         set_dest_will_execute = True
-    #                     else:
-    #                         set_dest_will_execute = False
+    # param_correspondence = (
+    #     (dataflow_free_vars["A"], llvm_init_config.variables["%A"]),
+    #     (dataflow_free_vars["B"], llvm_init_config.variables["%B"]),
+    #     (dataflow_free_vars["len"], llvm_init_config.variables["%len"]),
+    # )
 
-    #                     if dest_will_execute is None:
-    #                         dest_will_execute = set_dest_will_execute
-    #                     else:
-    #                         assert dest_will_execute == set_dest_will_execute, \
-    #                                f"inconsistent dest operator usage for channel {channel.id}"
-                            
-    #             print(f"channel {channel.id} usage:", source_have_executed, dest_will_execute)
-
-    llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][0] ] +\
-                              final_llvm_configs[0]
-
-    param_correspondence = (
-        (dataflow_free_vars["A"], llvm_init_config.variables["%A"]),
-        (dataflow_free_vars["B"], llvm_init_config.variables["%B"]),
-        (dataflow_free_vars["len"], llvm_init_config.variables["%len"]),
-    )
-
-    dataflow_branches = run_dataflow_with_schedule(
-        dataflow_init_config.copy(),
-        llvm_branches_from_init,
-        param_correspondence,
-    )
+    # dataflow_branches = run_dataflow_with_schedule(
+    #     dataflow_init_config.copy(),
+    #     llvm_branches_from_init,
+    #     param_correspondence,
+    # )
     
-    for llvm_branch, dataflow_config in dataflow_branches:
-        print(llvm_branch.config)
-        print(llvm_branch.trace)
-        print(dataflow_config)
+    # for llvm_branch, dataflow_config in dataflow_branches:
+    #     print(llvm_branch.config)
+    #     print(llvm_branch.trace)
+    #     print(dataflow_config)
 
-    dataflow_cut_point_2, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[1][1])
+    # dataflow_cut_point_2, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[1][1])
 
-    print(dataflow_cut_point_2)
-    print(correspondence)
+    # print(dataflow_cut_point_2)
+    # print(correspondence)
 
-    # same but for cut point
-    llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][2] ] +\
-                              final_llvm_configs[2]
+    # # same but for cut point
+    # llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][2] ] +\
+    #                           final_llvm_configs[2]
+    # param_correspondence = (
+    #     (dataflow_free_vars["A"], llvm_cut_points[2].variables["%A"]),
+    #     (dataflow_free_vars["B"], llvm_cut_points[2].variables["%B"]),
+    #     (dataflow_free_vars["len"], llvm_cut_points[2].variables["%len"]),
+    # )
+    # correspondence = tuple((dataflow_smt_var, llvm_cut_points[2].variables[llvm_var]) for llvm_var, dataflow_smt_vars in correspondence.items() for dataflow_smt_var in dataflow_smt_vars)
 
-    # (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
-    # (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
-    # (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
-    # (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")), # TODO: should we leave this here?
-    # (r"%4", smt.FreshSymbol(smt.BVType(32), "llvm_var_4_%d")),
-    # (r"%add", smt.FreshSymbol(smt.BVType(32), "llvm_var_add_%d")),
-    # (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_%d")),
-    # (r"%i.0", smt.FreshSymbol(smt.BVType(32), "llvm_var_i_0_%d")),
-    # (r"%1", smt.FreshSymbol(smt.BVType(32), "llvm_var_1_%d")),
-    # (r"%arrayidx", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_var_arrayidx_%d")),
+    # dataflow_branches = run_dataflow_with_schedule(
+    #     dataflow_cut_point_2.copy(),
+    #     llvm_branches_from_init,
+    #     param_correspondence + correspondence,
+    # )
 
-    param_correspondence = (
-        (dataflow_free_vars["A"], llvm_cut_points[2].variables["%A"]),
-        (dataflow_free_vars["B"], llvm_cut_points[2].variables["%B"]),
-        (dataflow_free_vars["len"], llvm_cut_points[2].variables["%len"]),
-    )
-    correspondence = tuple((dataflow_smt_var, llvm_cut_points[2].variables[llvm_var]) for llvm_var, dataflow_smt_vars in correspondence.items() for dataflow_smt_var in dataflow_smt_vars)
+    # dataflow_cut_point_1, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[0][1])
 
-    dataflow_branches = run_dataflow_with_schedule(
-        dataflow_cut_point_2.copy(),
-        llvm_branches_from_init,
-        param_correspondence + correspondence,
-    )
-
-    dataflow_cut_point_1, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[0][1])
-
-    print(dataflow_cut_point_1)
-    print(correspondence)
-
-    dataflow_cut_points = (
-        dataflow_init_config,
-        dataflow_cut_point_1,
-        dataflow_cut_point_2,
-    )
+    # print(dataflow_cut_point_1)
+    # print(correspondence)
 
     return
 

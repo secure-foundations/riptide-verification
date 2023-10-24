@@ -340,6 +340,13 @@ class ChannelState:
 
         assert len(self.values) != 0, "popping an empty channel"
         return self.values.pop(0)
+    
+    def peek(self) -> PermissionedValue:
+        if self.hold_constant is not None:
+            return self.hold_constant
+
+        assert len(self.values) != 0, "peeking an empty channel"
+        return self.values[0]
 
     def push(self, value: PermissionedValue) -> None:
         assert self.hold_constant is None, "pushing into a constant channel"
@@ -361,6 +368,9 @@ class ChannelState:
 class WildcardChannelState(ChannelState):
     def pop(self) -> PermissionedValue:
         assert False, "cannot pop from a wildcard channel state"
+    
+    def peek(self) -> PermissionedValue:
+        assert False, "cannot peek a wildcard channel state"
 
     def push(self, value: PermissionedValue) -> None:
         assert False, "cannot push to a wildcard channel state"
@@ -410,11 +420,7 @@ class Configuration:
     # Memory is currently modelled as a map
     # address (WORD_WIDTH) |-> value (WORD_WIDTH)
     memory_updates: List[MemoryUpdate] = field(default_factory=list)
-
-    # memory_var represents the current state of the memory
-    # if None, means the current memory_var is outdated and does not capture the
-    # current memory updates
-    memory_var: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
+    memory: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
 
     path_conditions: List[smt.SMTTerm] = field(default_factory=list)
 
@@ -483,6 +489,7 @@ class Configuration:
 
         assert isinstance(result, MatchingSuccess)
 
+        # TODO: this is ignoring memory constraints
         substituted_path_conditions = (
             path_condition.substitute(result.substitution)
             for path_condition in self.path_conditions
@@ -561,7 +568,7 @@ class Configuration:
             tuple(operator.copy() for operator in self.operator_states),
             tuple(state.copy() for state in self.channel_states),
             list(self.memory_updates),
-            self.memory_var,
+            self.memory,
             list(self.path_conditions),
             list(self.permission_constraints),
             self.permission_var_count,
@@ -569,16 +576,10 @@ class Configuration:
 
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
         self.memory_updates.append(MemoryUpdate(base, index, value))
-
-        new_memory_var = Configuration.get_fresh_memory_var()
-        self.path_conditions.append(smt.Equals(
-            new_memory_var,
-            smt.Store(self.memory_var, smt.BVAdd(base, index), value),
-        ))
-        self.memory_var = new_memory_var
+        self.memory = smt.Store(self.memory, smt.BVAdd(base, index), value)
 
     def read_memory(self, base: smt.SMTTerm, index: smt.SMTTerm) -> smt.SMTTerm:
-        return smt.Select(self.memory_var, smt.BVAdd(base, index))
+        return smt.Select(self.memory, smt.BVAdd(base, index))
 
     def get_fresh_permission_var(self, prefix="p") -> permission.PermissionVariable:
         var = permission.PermissionVariable(f"{prefix}{self.permission_var_count}")
@@ -592,7 +593,6 @@ class Configuration:
         with smt.Solver(name="z3") as solver:
             for path_condition in self.path_conditions:
                 solver.add_assertion(path_condition)
-
             # true for sat, false for unsat
             return solver.solve()
 

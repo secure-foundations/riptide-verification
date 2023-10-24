@@ -10,6 +10,9 @@ import semantics.dataflow as dataflow
 import semantics.llvm as llvm
 
 
+dummy_permission = dataflow.PermissionVariable("dummy")
+
+
 def set_up_carry_gate(config: dataflow.Configuration, pe_id: int, name: str):
     dummy_permission = dataflow.PermissionVariable("dummy")
     pe = config.graph.vertices[pe_id]
@@ -32,7 +35,6 @@ def set_up_carry_gate(config: dataflow.Configuration, pe_id: int, name: str):
 
 
 def set_up_inv_gate(config: dataflow.Configuration, pe_id: int, name: str):
-    dummy_permission = dataflow.PermissionVariable("dummy")
     pe = config.graph.vertices[pe_id]
 
     config.operator_states[pe_id].transition_to(dataflow.InvariantOperator.loop)
@@ -159,7 +161,7 @@ def run_dataflow_with_schedule(
             ):
                 second_branch.append(branch)
             else:
-                assert False, f"bad branch"
+                assert False, f"bad branch on condition {results[0].config.path_conditions[-1]}"
 
         # print(len(first_branch), len(second_branch))
 
@@ -223,6 +225,127 @@ def run_dataflow_with_schedule(
         trace_counter += 1
 
 
+def find_non_steer_inv_producer(graph: dataflow.DataflowGraph, channel_id: int) -> Optional[int]:
+    """
+    Find the non-steer and non-inv producer of a channel
+    """
+
+    channel = graph.channels[channel_id]
+    if channel.source is None:
+        return None
+
+    source_pe = graph.vertices[channel.source]
+
+    if source_pe.operator == "CF_CFG_OP_STEER" or source_pe.operator == "CF_CFG_OP_INVARIANT":
+        return find_non_steer_inv_producer(graph, source_pe.inputs[1].id)
+    
+    else:
+        return source_pe.id
+
+
+def generalize_dataflow_config(
+    llvm_function: llvm.Function,
+    init_config: dataflow.Configuration,
+    config: dataflow.Configuration,
+) -> Tuple[dataflow.Configuration, Dict[str, List[smt.SMTTerm]]]:
+    """
+    Generalize a dataflow config to a cut point.
+
+    Returns the generalized template and a mapping from llvm variables to SMT variables used in channels
+    """
+    init_config = init_config.copy()
+
+    llvm_correspondence: Dict[str, List[smt.SMTTerm]] = {}
+
+    # Mirror the operator states
+    for pe_id, operator in enumerate(config.operator_states):
+        init_config.operator_states[pe_id].transition_to(operator.current_transition)
+
+        if isinstance(operator, dataflow.InvariantOperator) and \
+           operator.current_transition == dataflow.InvariantOperator.loop:
+            actual_producer = find_non_steer_inv_producer(config.graph, config.graph.vertices[pe_id].inputs[1].id)
+
+            if actual_producer is not None:
+                producer_pe = config.graph.vertices[actual_producer]
+                if producer_pe.llvm_position is not None:
+                    block_name, instr_index = producer_pe.llvm_position
+                    llvm_instr = llvm_function.blocks[block_name].instructions[instr_index]
+                    defined_var = llvm_instr.get_defined_variable()
+                    assert defined_var is not None, f"source pe {channel.source} corresponds to a non-definition {llvm_instr}"
+                    sanitized_defined_var = defined_var[1:].replace('.', '_')
+                    fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_defined_var}_%d")
+                    
+                    if defined_var not in llvm_correspondence:
+                        llvm_correspondence[defined_var] = []
+                    llvm_correspondence[defined_var].append(fresh_var)
+                else:
+                    fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_unknown_inv_channel_{channel.id}_%d")
+            else:
+                fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_unknown_inv_constant_{channel.id}_%d")
+
+            init_config.operator_states[pe_id].value = fresh_var
+
+    for channel_id, channel_state in enumerate(config.channel_states):
+        if channel_state.hold_constant is not None:
+            continue
+
+        if channel_state.count() == 0:
+            if init_config.channel_states[channel_id].ready():
+                init_config.channel_states[channel_id].pop()
+            continue
+
+        # All channels should have at most one value
+        assert channel_state.count() == 1, f"channel {channel_id} has more than one value"
+
+        channel = config.graph.channels[channel_id]
+        dest_pe = config.graph.vertices[channel.destination]
+
+        assert init_config.channel_states[channel_id].count() <= 1
+        if init_config.channel_states[channel_id].ready():
+            init_config.channel_states[channel_id].pop()
+
+        # If the destination is a carry, we need to simplify the decider condition to True
+        if dest_pe.operator == "CF_CFG_OP_CARRY" and channel.destination_port == 0:
+            # TODO: check if the channel value is always true under path condition
+            init_config.channel_states[channel_id].push(
+                dataflow.PermissionedValue(
+                    smt.BVConst(1, dataflow.WORD_WIDTH),
+                    dummy_permission,
+                ),
+            )
+
+        else:
+            # Generalize the value in the channel and assign an LLVM correspondence
+            actual_producer = find_non_steer_inv_producer(config.graph, channel_id)
+
+            if actual_producer is not None:
+                producer_pe = config.graph.vertices[actual_producer]
+                if producer_pe.llvm_position is not None:
+                    block_name, instr_index = producer_pe.llvm_position
+                    llvm_instr = llvm_function.blocks[block_name].instructions[instr_index]
+                    defined_var = llvm_instr.get_defined_variable()
+                    assert defined_var is not None, f"source pe {channel.source} corresponds to a non-definition {llvm_instr}"
+                    sanitized_defined_var = defined_var[1:].replace('.', '_')
+                    fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_defined_var}_%d")
+
+                    if defined_var not in llvm_correspondence:
+                        llvm_correspondence[defined_var] = []
+                    llvm_correspondence[defined_var].append(fresh_var)
+                else:
+                    fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_unknown_channel_{channel.id}_%d")
+            else:
+                fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_unknown_constant_%d")
+
+            init_config.channel_states[channel_id].push(
+                dataflow.PermissionedValue(
+                    fresh_var,
+                    dummy_permission,
+                ),
+            )
+
+    return init_config, llvm_correspondence
+
+
 def main():
     """
     See examples/bisim/test-4.png for operator and channel IDs in the dataflow graph
@@ -237,8 +360,6 @@ def main():
             for function_arg in dfg.function_arguments
         }
         dataflow_init_config = dataflow.Configuration.get_initial_configuration(dfg, dataflow_free_vars)
-
-        dummy_permission = dataflow.PermissionVariable("dummy")
 
         dataflow_outer_config = dataflow_init_config.copy()
         dataflow_inner_config = dataflow_init_config.copy()
@@ -569,20 +690,66 @@ def main():
     llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][0] ] +\
                               final_llvm_configs[0]
 
+    param_correspondence = (
+        (dataflow_free_vars["A"], llvm_init_config.variables["%A"]),
+        (dataflow_free_vars["B"], llvm_init_config.variables["%B"]),
+        (dataflow_free_vars["len"], llvm_init_config.variables["%len"]),
+    )
+
     dataflow_branches = run_dataflow_with_schedule(
-        dataflow_init_config,
+        dataflow_init_config.copy(),
         llvm_branches_from_init,
-        (
-            (dataflow_free_vars["A"], llvm_init_config.variables["%A"]),
-            (dataflow_free_vars["B"], llvm_init_config.variables["%B"]),
-            (dataflow_free_vars["len"], llvm_init_config.variables["%len"]),
-        ),
+        param_correspondence,
     )
     
     for llvm_branch, dataflow_config in dataflow_branches:
         print(llvm_branch.config)
         print(llvm_branch.trace)
         print(dataflow_config)
+
+    dataflow_cut_point_2, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[1][1])
+
+    print(dataflow_cut_point_2)
+    print(correspondence)
+
+    # same but for cut point
+    llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][2] ] +\
+                              final_llvm_configs[2]
+
+    # (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
+    # (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
+    # (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
+    # (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")), # TODO: should we leave this here?
+    # (r"%4", smt.FreshSymbol(smt.BVType(32), "llvm_var_4_%d")),
+    # (r"%add", smt.FreshSymbol(smt.BVType(32), "llvm_var_add_%d")),
+    # (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_%d")),
+    # (r"%i.0", smt.FreshSymbol(smt.BVType(32), "llvm_var_i_0_%d")),
+    # (r"%1", smt.FreshSymbol(smt.BVType(32), "llvm_var_1_%d")),
+    # (r"%arrayidx", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_var_arrayidx_%d")),
+
+    param_correspondence = (
+        (dataflow_free_vars["A"], llvm_cut_points[2].variables["%A"]),
+        (dataflow_free_vars["B"], llvm_cut_points[2].variables["%B"]),
+        (dataflow_free_vars["len"], llvm_cut_points[2].variables["%len"]),
+    )
+    correspondence = tuple((dataflow_smt_var, llvm_cut_points[2].variables[llvm_var]) for llvm_var, dataflow_smt_vars in correspondence.items() for dataflow_smt_var in dataflow_smt_vars)
+
+    dataflow_branches = run_dataflow_with_schedule(
+        dataflow_cut_point_2.copy(),
+        llvm_branches_from_init,
+        param_correspondence + correspondence,
+    )
+
+    dataflow_cut_point_1, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[0][1])
+
+    print(dataflow_cut_point_1)
+    print(correspondence)
+
+    dataflow_cut_points = (
+        dataflow_init_config,
+        dataflow_cut_point_1,
+        dataflow_cut_point_2,
+    )
 
     return
 

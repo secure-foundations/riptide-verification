@@ -347,6 +347,10 @@ class ChannelState:
 
     def ready(self) -> bool:
         return self.hold_constant is not None or len(self.values) != 0
+    
+    def count(self) -> int:
+        assert self.hold_constant is None
+        return len(self.values)
 
     def copy(self) -> ChannelState:
         return ChannelState(self.hold_constant, list(self.values))
@@ -363,6 +367,9 @@ class WildcardChannelState(ChannelState):
 
     def ready(self) -> bool:
         assert False, "cannot check status of a wildcard channel state"
+
+    def count(self) -> int:
+        assert False, "cannot count values in a wildcard channel state"
 
     def copy(self) -> ChannelState:
         return self

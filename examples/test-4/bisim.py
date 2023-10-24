@@ -13,41 +13,6 @@ import semantics.llvm as llvm
 dummy_permission = dataflow.PermissionVariable("dummy")
 
 
-def set_up_carry_gate(config: dataflow.Configuration, pe_id: int, name: str):
-    dummy_permission = dataflow.PermissionVariable("dummy")
-    pe = config.graph.vertices[pe_id]
-
-    config.operator_states[pe_id].transition_to(dataflow.CarryOperator.loop)
-
-    config.channel_states[pe.inputs[0].id].push(
-        dataflow.PermissionedValue(
-            smt.BVConst(1, dataflow.WORD_WIDTH),
-            dummy_permission,
-        ),
-    )
-
-    # config.channel_states[pe.inputs[2].id].push(
-    #     dataflow.PermissionedValue(
-    #         smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_" + name + "_%d"),
-    #         dummy_permission,
-    #     ),
-    # )
-
-
-def set_up_inv_gate(config: dataflow.Configuration, pe_id: int, name: str):
-    pe = config.graph.vertices[pe_id]
-
-    config.operator_states[pe_id].transition_to(dataflow.InvariantOperator.loop)
-    config.operator_states[pe_id].value = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_var_" + name + "_%d")
-
-    config.channel_states[pe.inputs[0].id].push(
-        dataflow.PermissionedValue(
-            smt.BVConst(1, dataflow.WORD_WIDTH),
-            dummy_permission,
-        ),
-    )
-
-
 @dataclass
 class LLVMExecutionBranch:
     config: llvm.Configuration
@@ -86,10 +51,6 @@ def run_dataflow_until_branch(
         return dataflow.NextConfiguration(config),
 
     return ()
-
-
-def is_steer_inv(pe: dataflow.ProcessingElement) -> bool:
-    return pe.operator == "CF_CFG_OP_STEER" or pe.operator == "CF_CFG_OP_INVARIANT"
 
 
 def check_implication(a: Iterable[smt.SMTTerm], b: Iterable[smt.SMTTerm]) -> bool:
@@ -136,7 +97,7 @@ def run_dataflow_with_schedule(
     steer_inv_pe_ids = tuple(
         pe.id
         for pe in config.graph.vertices
-        if is_steer_inv(pe)
+        if pe.operator == "CF_CFG_OP_STEER" or pe.operator == "CF_CFG_OP_INVARIANT"
     )
 
     def branch(results: Tuple[dataflow.StepResult, ...], new_trace_counter: int):
@@ -385,6 +346,7 @@ def main():
     
         llvm_init_config = llvm.Configuration.get_initial_configuration(module, function)
 
+        llvm_var_lso_alloc2_1 = smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_%d")
         llvm_outer_config = llvm.Configuration(
             module,
             function,
@@ -396,8 +358,8 @@ def main():
                 (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
                 (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
                 (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")),
-                (r"%lso.alloc2.1", smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_%d")), # TODO: figure out how to generate this
-                (r"%lso.alloc2.1.lcssa", smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_lcssa_%d")),
+                (r"%lso.alloc2.1", llvm_var_lso_alloc2_1), # TODO: figure out how to generate this
+                (r"%lso.alloc2.1.lcssa", llvm_var_lso_alloc2_1),
                 (r"%inc8", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc8_%d")),
             ]),
             path_conditions=[],
@@ -471,6 +433,7 @@ def main():
                     for j, llvm_cut_point in enumerate(llvm_cut_points):
                         match = llvm_cut_point.match(result.config)
                         if isinstance(match, MatchingSuccess):
+                            assert match.check_condition(), "invalid match"
                             print(f"[llvm] found a matched config to cut point {j}")
                             matched_llvm_configs[j][i].append((LLVMExecutionBranch(result.config, new_trace), match))
                             break
@@ -562,56 +525,134 @@ def main():
 
     for i in range(num_cut_points):
         for j in range(num_cut_points):
-            print(f"### matched cut point {j} -> {i} ###")
-            for config, match in matched_dataflow_configs[i][j]:
-                print("===== dataflow start =====")
-                print("memory_updates:")
-                for update in config.memory_updates:
-                    print(f"  {update}")
-                print("path conditions:")
-                for path_condition in config.path_conditions:
-                    print(f"  {path_condition}")
-                print("matching substitution:", match.substitution)
-                print("===== dataflow end =====")
+            print(f"[sync] checking matched cut point {j} -> {i}")
+            
+            if len(matched_dataflow_configs[i][j]) == len(matched_llvm_configs[i][j]) == 0:
+                continue
 
-            for branch, match in matched_llvm_configs[i][j]:
-                # print(config)
-                assert match.check_condition(), "invalid match"
-                print("===== llvm start =====")
-                print("memory_updates:")
-                for update in branch.config.memory_updates:
-                    print(f"  {update}")
-                print("path conditions:")
-                for path_condition in branch.config.path_conditions:
-                    print(f"  {path_condition}")
-                print("matching substitution:", match.substitution)
-                print("trace:", branch.trace)
-                print("===== llvm end =====")
-                # print("matching condition:", match.condition.simplify())
+            assert len(matched_dataflow_configs[i][j]) == len(matched_llvm_configs[i][j]) == 1
+
+            dataflow_config, dataflow_match = matched_dataflow_configs[i][j][0]
+            llvm_branch, llvm_match = matched_llvm_configs[i][j][0]
+            llvm_config = llvm_branch.config
+
+            # # print(f"### matched cut point {j} -> {i} ###")
+            # for config, match in matched_dataflow_configs[i][j]:
+            #     print("===== dataflow start =====")
+            #     print("memory_updates:")
+            #     for update in config.memory_updates:
+            #         print(f"  {update}")
+            #     print("path conditions:")
+            #     for path_condition in config.path_conditions:
+            #         print(f"  {path_condition}")
+            #     print("matching substitution:", match.substitution)
+            #     print("===== dataflow end =====")
+
+            # for branch, match in matched_llvm_configs[i][j]:
+            #     print("===== llvm start =====")
+            #     print("memory_updates:")
+            #     for update in branch.config.memory_updates:
+            #         print(f"  {update}")
+            #     print("path conditions:")
+            #     for path_condition in branch.config.path_conditions:
+            #         print(f"  {path_condition}")
+            #     print("matching substitution:", match.substitution)
+            #     print("trace:", branch.trace)
+            #     print("===== llvm end =====")
+            
+            # print(smt.Equals(dataflow_cut_points[j].memory, llvm_cut_points[j].memory))
+            # print(*(
+            #             smt.Equals(dataflow_var, llvm_var)
+            #             for dataflow_var, llvm_var in var_correspondence[j]
+            #         ))
+            # print("should imply")
+            # print(dataflow_config.memory, llvm_config.memory)
+            # print(*(
+            #             smt.Equals(dataflow_match.substitution[dataflow_var], llvm_match.substitution[llvm_var])
+            #             for dataflow_var, llvm_var in var_correspondence[i]
+            #         ),)
+
+            assert check_implication(
+                (
+                    smt.Equals(dataflow_cut_points[j].memory, llvm_cut_points[j].memory),
+                    *(
+                        smt.Equals(dataflow_free_vars[function_arg.variable_name], llvm_cut_points[j].variables["%" + function_arg.variable_name])
+                        for function_arg in dfg.function_arguments
+                    ),
+                    *(
+                        smt.Equals(dataflow_var, llvm_var)
+                        for dataflow_var, llvm_var in var_correspondence[j]
+                    ),
+                ),
+                (
+                    smt.Equals(dataflow_config.memory, llvm_config.memory),
+                    # Target cut point correspondence
+                    *(
+                        smt.Equals(dataflow_match.substitution[dataflow_var], llvm_match.substitution[llvm_var])
+                        for dataflow_var, llvm_var in var_correspondence[i]
+                    ),
+
+                    # Path condition equivalence
+                    smt.Iff(
+                        smt.And(*dataflow_config.path_conditions),
+                        smt.And(*llvm_config.path_conditions),
+                    ),
+                ),
+            )
 
     for i in range(num_cut_points):
-        print(f"### final configs from {i} ###")
+        print(f"[sync] checking final configs from {i}")
 
-        for config in final_dataflow_configs[i]:
-            print("===== dataflow start =====")
-            print("memory_updates:")
-            for update in config.memory_updates:
-                print(f"  {update}")
-            print("path conditions:")
-            for path_condition in config.path_conditions:
-                print(f"  {path_condition}")
-            print("===== dataflow end =====")
+        if len(final_dataflow_configs[i]) == len(final_llvm_configs[i]) == 0:
+            continue
 
-        for branch in final_llvm_configs[i]:
-            print("===== llvm start =====")
-            print("memory_updates:")
-            for update in branch.config.memory_updates:
-                print(f"  {update}")
-            print("path conditions:")
-            for path_condition in branch.config.path_conditions:
-                print(f"  {path_condition}")
-            print("trace:", branch.trace)
-            print("===== llvm end =====")
+        assert len(final_dataflow_configs[i]) == len(final_llvm_configs[i]) == 1
+
+        dataflow_config = final_dataflow_configs[i][0]
+        llvm_config = final_llvm_configs[i][0].config
+
+        assert check_implication(
+            (
+                smt.Equals(dataflow_cut_points[i].memory, llvm_cut_points[i].memory),
+                *(
+                    smt.Equals(dataflow_free_vars[function_arg.variable_name], llvm_cut_points[i].variables["%" + function_arg.variable_name])
+                    for function_arg in dfg.function_arguments
+                ),
+                *(
+                    smt.Equals(dataflow_var, llvm_var)
+                    for dataflow_var, llvm_var in var_correspondence[i]
+                ),
+            ),
+            (
+                # We only require memory equality and path condition equivalence for the final config
+                smt.Equals(dataflow_config.memory, llvm_config.memory),
+                smt.Iff(
+                    smt.And(*dataflow_config.path_conditions),
+                    smt.And(*llvm_config.path_conditions),
+                ),
+            ),
+        )
+
+        # for config in final_dataflow_configs[i]:
+        #     print("===== dataflow start =====")
+        #     print("memory_updates:")
+        #     for update in config.memory_updates:
+        #         print(f"  {update}")
+        #     print("path conditions:")
+        #     for path_condition in config.path_conditions:
+        #         print(f"  {path_condition}")
+        #     print("===== dataflow end =====")
+
+        # for branch in final_llvm_configs[i]:
+        #     print("===== llvm start =====")
+        #     print("memory_updates:")
+        #     for update in branch.config.memory_updates:
+        #         print(f"  {update}")
+        #     print("path conditions:")
+        #     for path_condition in branch.config.path_conditions:
+        #         print(f"  {path_condition}")
+        #     print("trace:", branch.trace)
+        #     print("===== llvm end =====")
 
 
 if __name__ == "__main__":

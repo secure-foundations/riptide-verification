@@ -33,12 +33,17 @@ class MatchingSuccess:
             return other
         
         assert isinstance(other, MatchingSuccess)
-        assert set(self.substitution.keys()).isdisjoint(set(other.substitution.keys())), \
-               f"overlapping keys {set(self.substitution.keys())}, {set(other.substitution.keys())}"
+        # assert set(self.substitution.keys()).isdisjoint(set(other.substitution.keys())), \
+        #        f"overlapping keys {set(self.substitution.keys())}, {set(other.substitution.keys())}"
         
+        overlapping_constraint = []
+        
+        for overlapping_key in set(self.substitution.keys()).intersection(set(other.substitution.keys())):
+            overlapping_constraint.append(smt.Equals(self.substitution[overlapping_key], other.substitution[overlapping_key]))
+
         return MatchingSuccess(
             OrderedDict(tuple(self.substitution.items()) + tuple(other.substitution.items())),
-            smt.And(self.condition, other.condition),
+            smt.And(self.condition, other.condition, *overlapping_constraint),
         )
     
     def check_condition(self) -> bool:

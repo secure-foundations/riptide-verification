@@ -626,20 +626,29 @@ def main():
 
     # Actually check that matched_dataflow_configs matches the corresponding cut points
     for i in range(num_cut_points):
-        matched = [ config for j in range(num_cut_points) for config in matched_dataflow_configs[i][j] ]
+        for j in range(num_cut_points):
+            for k, config in enumerate(matched_dataflow_configs[i][j]):
+                match = dataflow_cut_points[i].match(config)
+                if isinstance(match, MatchingSuccess):
+                    assert match.check_condition(), "invalid match"
+                    matched_dataflow_configs[i][j][k] = config, match
+                else:
+                    assert False, "match failure"
 
-        for config in matched:
-            result = dataflow_cut_points[i].match(config)
-            if isinstance(result, MatchingSuccess):
-                assert match.check_condition(), "invalid match"
-            else:
-                assert False, "match failure"
+    for i in range(num_cut_points):
+        for j in range(num_cut_points):
+            print(f"### matched cut point {j} -> {i} ###")
+            for config, match in matched_dataflow_configs[i][j]:
+                print("===== dataflow start =====")
+                print("memory_updates:")
+                for update in config.memory_updates:
+                    print(f"  {update}")
+                print("path conditions:")
+                for path_condition in config.path_conditions:
+                    print(f"  {path_condition}")
+                print("matching substitution:", match.substitution)
+                print("===== dataflow end =====")
 
-    return
-
-    for i in range(len(llvm_cut_points)):
-        for j in range(len(llvm_cut_points)):
-            print(f"### [llvm] matched cut point {j} -> {i} ###")
             for branch, match in matched_llvm_configs[i][j]:
                 # print(config)
                 assert match.check_condition(), "invalid match"
@@ -655,8 +664,19 @@ def main():
                 print("===== llvm end =====")
                 # print("matching condition:", match.condition.simplify())
 
-    for i in range(len(llvm_cut_points)):
-        print(f"### [llvm] final configs from {i} ###")
+    for i in range(num_cut_points):
+        print(f"### final configs from {i} ###")
+
+        for config in final_dataflow_configs[i]:
+            print("===== dataflow start =====")
+            print("memory_updates:")
+            for update in config.memory_updates:
+                print(f"  {update}")
+            print("path conditions:")
+            for path_condition in config.path_conditions:
+                print(f"  {path_condition}")
+            print("===== dataflow end =====")
+
         for branch in final_llvm_configs[i]:
             print("===== llvm start =====")
             print("memory_updates:")

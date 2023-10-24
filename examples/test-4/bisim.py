@@ -618,51 +618,22 @@ def main():
     mirro_llvm_cut_point(2)
     mirro_llvm_cut_point(1)
 
-    # llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][0] ] +\
-    #                           final_llvm_configs[0]
+    for j in range(num_cut_points):
+        for i in range(num_cut_points):
+            print(f"[dataflow] {j} -> {i}:", len(matched_dataflow_configs[i][j]))
 
-    # param_correspondence = (
-    #     (dataflow_free_vars["A"], llvm_init_config.variables["%A"]),
-    #     (dataflow_free_vars["B"], llvm_init_config.variables["%B"]),
-    #     (dataflow_free_vars["len"], llvm_init_config.variables["%len"]),
-    # )
+        print(f"[dataflow] {j} -> ⊥:", len(final_dataflow_configs[j]))
 
-    # dataflow_branches = run_dataflow_with_schedule(
-    #     dataflow_init_config.copy(),
-    #     llvm_branches_from_init,
-    #     param_correspondence,
-    # )
-    
-    # for llvm_branch, dataflow_config in dataflow_branches:
-    #     print(llvm_branch.config)
-    #     print(llvm_branch.trace)
-    #     print(dataflow_config)
+    # Actually check that matched_dataflow_configs matches the corresponding cut points
+    for i in range(num_cut_points):
+        matched = [ config for j in range(num_cut_points) for config in matched_dataflow_configs[i][j] ]
 
-    # dataflow_cut_point_2, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[1][1])
-
-    # print(dataflow_cut_point_2)
-    # print(correspondence)
-
-    # # same but for cut point
-    # llvm_branches_from_init = [ branch for i in range(len(llvm_cut_points)) for branch, match in matched_llvm_configs[i][2] ] +\
-    #                           final_llvm_configs[2]
-    # param_correspondence = (
-    #     (dataflow_free_vars["A"], llvm_cut_points[2].variables["%A"]),
-    #     (dataflow_free_vars["B"], llvm_cut_points[2].variables["%B"]),
-    #     (dataflow_free_vars["len"], llvm_cut_points[2].variables["%len"]),
-    # )
-    # correspondence = tuple((dataflow_smt_var, llvm_cut_points[2].variables[llvm_var]) for llvm_var, dataflow_smt_vars in correspondence.items() for dataflow_smt_var in dataflow_smt_vars)
-
-    # dataflow_branches = run_dataflow_with_schedule(
-    #     dataflow_cut_point_2.copy(),
-    #     llvm_branches_from_init,
-    #     param_correspondence + correspondence,
-    # )
-
-    # dataflow_cut_point_1, correspondence = generalize_dataflow_config(function, dataflow_init_config, dataflow_branches[0][1])
-
-    # print(dataflow_cut_point_1)
-    # print(correspondence)
+        for config in matched:
+            result = dataflow_cut_points[i].match(config)
+            if isinstance(result, MatchingSuccess):
+                assert match.check_condition(), "invalid match"
+            else:
+                assert False, "match failure"
 
     return
 

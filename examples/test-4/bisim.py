@@ -408,12 +408,12 @@ def main():
     num_cut_points = len(llvm_cut_points)
 
     # matched_llvm_configs[i][j]: configs matched to i starting from j
-    matched_llvm_configs = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
+    matched_llvm_configs: Dict[int, Dict[int, Tuple[LLVMExecutionBranch, MatchingResult]]] = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
     # final_llvm_configs[i]: final configs starting from i
-    final_llvm_configs = { i: [] for i in range(num_cut_points) }
+    final_llvm_configs: Dict[int, LLVMExecutionBranch] = { i: [] for i in range(num_cut_points) }
 
-    matched_dataflow_configs = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
-    final_dataflow_configs = { i: [] for i in range(num_cut_points) }
+    matched_dataflow_configs: Dict[int, Dict[int, Tuple[dataflow.Configuration, Optional[MatchingResult]]]] = { i: { j: [] for j in range(num_cut_points) } for i in range(num_cut_points) }
+    final_dataflow_configs: Dict[int, dataflow.Configuration] = { i: [] for i in range(num_cut_points) }
 
     for i, llvm_cut_point in enumerate(llvm_cut_points):
         print(f"##### trying cut point pair {i} #####")
@@ -449,7 +449,7 @@ def main():
 
     # for function_arg in dfg.function_arguments
 
-    def mirro_llvm_cut_point(cut_point_index: int):
+    def mirror_llvm_cut_point(cut_point_index: int):
         llvm_cut_point = llvm_cut_points[cut_point_index]
         dataflow_cut_point = dataflow_cut_points[cut_point_index]
 
@@ -482,7 +482,7 @@ def main():
         for llvm_branch, dataflow_branch in matched_branches:
             if id(llvm_branch) in llvm_branch_to_cut_point_index:
                 target_cut_point_index = llvm_branch_to_cut_point_index[id(llvm_branch)]
-                matched_dataflow_configs[target_cut_point_index][cut_point_index].append(dataflow_branch)
+                matched_dataflow_configs[target_cut_point_index][cut_point_index].append((dataflow_branch, None))
 
                 # Infer the target dataflow cut point
                 if dataflow_cut_points[target_cut_point_index] is None:
@@ -502,9 +502,10 @@ def main():
             else:
                 final_dataflow_configs[cut_point_index].append(dataflow_branch)
 
-    mirro_llvm_cut_point(0)
-    mirro_llvm_cut_point(2)
-    mirro_llvm_cut_point(1)
+    # TODO: perform this automatically
+    mirror_llvm_cut_point(0)
+    mirror_llvm_cut_point(2)
+    mirror_llvm_cut_point(1)
 
     for j in range(num_cut_points):
         for i in range(num_cut_points):
@@ -515,7 +516,7 @@ def main():
     # Actually check that matched_dataflow_configs matches the corresponding cut points
     for i in range(num_cut_points):
         for j in range(num_cut_points):
-            for k, config in enumerate(matched_dataflow_configs[i][j]):
+            for k, (config, _) in enumerate(matched_dataflow_configs[i][j]):
                 match = dataflow_cut_points[i].match(config)
                 if isinstance(match, MatchingSuccess):
                     assert match.check_condition(), "invalid match"

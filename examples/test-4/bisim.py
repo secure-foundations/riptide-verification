@@ -379,58 +379,12 @@ def main():
         }
         dataflow_init_config = dataflow.Configuration.get_initial_configuration(dfg, dataflow_free_vars)
 
-        dataflow_outer_config = dataflow_init_config.copy()
-        dataflow_inner_config = dataflow_init_config.copy()
-
-        # pop constant values
-        # dataflow_outer_config.channel_states[0].pop()
-        # dataflow_outer_config.channel_states[1].pop()
-        # dataflow_outer_config.channel_states[16].pop()
-        # dataflow_outer_config.channel_states[17].pop()
-        # dataflow_outer_config.channel_states[19].pop()
-        # dataflow_outer_config.channel_states[24].pop()
-
-        # outer loop carry gates: 7, 9
-        # outer loop inv gates: 1
-        set_up_carry_gate(dataflow_outer_config, 7, "inc8")
-        set_up_carry_gate(dataflow_outer_config, 9, "lso_alloc2_1_lcssa")
-        set_up_inv_gate(dataflow_outer_config, 1, "smax")
-
-        # pop constant values
-        # dataflow_inner_config.channel_states[0].pop()
-        # dataflow_inner_config.channel_states[1].pop()
-        # dataflow_inner_config.channel_states[16].pop()
-        # dataflow_inner_config.channel_states[17].pop()
-        # dataflow_inner_config.channel_states[19].pop()
-        # dataflow_inner_config.channel_states[24].pop()
-
-        # inner loop carry gates: 18, 19, 20
-        # inner loop inv gates: 10, 17
-        set_up_carry_gate(dataflow_inner_config, 7, "inc8")
-        set_up_carry_gate(dataflow_inner_config, 9, "lso_alloc2_1_lcssa")
-        set_up_carry_gate(dataflow_inner_config, 18, "inc")
-        set_up_carry_gate(dataflow_inner_config, 19, "add")
-        set_up_carry_gate(dataflow_inner_config, 20, "4")
-        set_up_inv_gate(dataflow_inner_config, 1, "smax")
-        set_up_inv_gate(dataflow_inner_config, 10, "arrayidx")
-        set_up_inv_gate(dataflow_inner_config, 17, "1")
-
-        # dataflow_inner_config.channel_states[32].push(
-        #     dataflow.PermissionedValue(
-        #         smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), "dataflow_i_0_%d"),
-        #         dummy_permission,
-        #     ),
-        # )
-        # dataflow_inner_config.channel_states[20].pop()
-        # dataflow_inner_config.channel_states[25].pop()
-
     with open("examples/test-4/test-4.lso.ll") as llvm_source:
         module = llvm.Parser.parse_module(llvm_source.read())
         function = tuple(module.functions.values())[0]
     
         llvm_init_config = llvm.Configuration.get_initial_configuration(module, function)
 
-        # llvm_var_lso_alloc2_1_lcssa = smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_lcssa_%d")
         llvm_outer_config = llvm.Configuration(
             module,
             function,
@@ -469,35 +423,6 @@ def main():
             ]),
             path_conditions=[],
         )
-
-    # dataflow_cut_points = [
-    #     (dataflow_init_config, [
-    #         0,
-    #         6,
-    #         1,
-    #         9,
-    #         7,
-    #         12,
-    #         16, 2, 15,
-    #         11,
-    #         5,
-
-    #         # enters inner loop
-    #         20,
-    #         19,
-    #         18,
-    #         10,
-    #         17,
-    #         22,
-    #         3, 14, 8, 21, 23,
-    #         25,
-    #         24,
-    #         4,
-    #         26,
-    #     ]),
-    #     (dataflow_outer_config, []),
-    #     (dataflow_inner_config, []),
-    # ]
 
     dataflow_cut_points = [
         dataflow_init_config,

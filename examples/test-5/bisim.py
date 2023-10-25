@@ -327,10 +327,10 @@ def generalize_dataflow_config(
 
 def main():
     """
-    See examples/bisim/test-4.png for operator and channel IDs in the dataflow graph
+    See examples/bisim/test-5.png for operator and channel IDs in the dataflow graph
     """
 
-    with open("examples/test-4/test-4.o2p") as dataflow_source:
+    with open("examples/test-5/test-5.o2p") as dataflow_source:
         dfg = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
         # Set up initial config for the dataflow program
@@ -340,27 +340,26 @@ def main():
         }
         dataflow_init_config = dataflow.Configuration.get_initial_configuration(dfg, dataflow_free_vars)
 
-    with open("examples/test-4/test-4.lso.ll") as llvm_source:
+    with open("examples/test-5/test-5.lso.ll") as llvm_source:
         module = llvm.Parser.parse_module(llvm_source.read())
         function = tuple(module.functions.values())[0]
     
         llvm_init_config = llvm.Configuration.get_initial_configuration(module, function)
 
-        llvm_var_lso_alloc2_1 = smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc2_1_%d")
+        llvm_var_lso_alloc1_1 = smt.FreshSymbol(smt.BVType(32), "llvm_var_lso_alloc1_1_%d")
         llvm_outer_config = llvm.Configuration(
             module,
             function,
-            current_block="for.cond",
-            previous_block="for.cond.cleanup3",
+            current_block="outer.header",
+            previous_block="outer.cleanup",
             current_instr_counter=0,
             variables=OrderedDict([
                 (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
                 (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
                 (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
-                (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")),
-                (r"%lso.alloc2.1", llvm_var_lso_alloc2_1), # TODO: figure out how to generate this
-                (r"%lso.alloc2.1.lcssa", llvm_var_lso_alloc2_1),
-                (r"%inc8", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc8_%d")),
+                (r"%lso.alloc1.1", llvm_var_lso_alloc1_1),
+                (r"%lso.alloc1.1.lcssa", llvm_var_lso_alloc1_1),
+                (r"%inc.i", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_i_%d")),
             ]),
             path_conditions=[],
         )
@@ -368,20 +367,16 @@ def main():
         llvm_inner_config = llvm.Configuration(
             module,
             function,
-            current_block="for.cond1",
-            previous_block="for.body4",
+            current_block="inner.header",
+            previous_block="inner.body",
             current_instr_counter=0,
             variables=OrderedDict([
                 (r"%A", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_A_%d")),
                 (r"%B", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_param_B_%d")),
                 (r"%len", smt.FreshSymbol(smt.BVType(32), "llvm_param_len_%d")),
-                (r"%smax", smt.FreshSymbol(smt.BVType(32), "llvm_var_smax_%d")), # TODO: should we leave this here?
-                (r"%4", smt.FreshSymbol(smt.BVType(32), "llvm_var_4_%d")),
-                (r"%add", smt.FreshSymbol(smt.BVType(32), "llvm_var_add_%d")),
-                (r"%inc", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_%d")),
-                (r"%i.0", smt.FreshSymbol(smt.BVType(32), "llvm_var_i_0_%d")),
                 (r"%1", smt.FreshSymbol(smt.BVType(32), "llvm_var_1_%d")),
-                (r"%arrayidx", smt.FreshSymbol(smt.BVType(llvm.WORD_WIDTH), "llvm_var_arrayidx_%d")),
+                (r"%inc.j", smt.FreshSymbol(smt.BVType(32), "llvm_var_inc_j_%d")),
+                (r"%i", smt.FreshSymbol(smt.BVType(32), "llvm_var_i_%d")),
             ]),
             path_conditions=[],
         )

@@ -1,4 +1,4 @@
-from typing import Any, Callable, Tuple, Generator
+from typing import Any, Callable, Tuple, Generator, Iterable, Optional
 
 from contextlib import contextmanager
 
@@ -64,6 +64,35 @@ def FreshSort() -> SMTSort:
     name = f"FreshSort{_fresh_sort_counter}"
     _fresh_sort_counter += 1
     return Type(name)
+
+
+def check_sat(terms: Iterable[SMTTerm], solver: Optional[Solver] = None) -> bool:
+    """
+    Check satisfiability of the conjunction of terms
+    """
+    if solver is None:
+        with Solver(name="z3") as solver:
+            return check_sat(terms, solver)
+    else:
+        with push_solver(solver):
+            for term in terms:
+                solver.add_assertion(term)
+            return solver.solve()
+
+
+def check_implication(a: Iterable[SMTTerm], b: Iterable[SMTTerm], solver: Optional[Solver] = None) -> bool:
+    """
+    Check the validity of the implication a => b
+    """
+    if solver is None:
+        with Solver(name="z3") as solver:
+            return check_implication(a, b, solver)
+    else:
+        with push_solver(solver):
+            for term in a:
+                solver.add_assertion(term)
+            solver.add_assertion(Not(And(*b)))
+            return not solver.solve()
 
 
 @contextmanager

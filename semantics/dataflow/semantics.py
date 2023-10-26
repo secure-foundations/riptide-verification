@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple, Optional, List, Generator, Type, Dict, Mapping, Any, Set, Callable
+from typing import Tuple, Optional, List, Generator, Type, Dict, Mapping, Any, Set, Callable, Iterable
 from dataclasses import dataclass, field
 from collections import OrderedDict
 
@@ -489,6 +489,9 @@ class Configuration:
 
         assert isinstance(result, MatchingSuccess)
 
+        assert self.memory.is_symbol()
+        result.substitution[self.memory] = other.memory
+
         # TODO: this is ignoring memory constraints
         substituted_path_conditions = (
             path_condition.substitute(result.substitution)
@@ -830,3 +833,31 @@ class Configuration:
             self.permission_constraints.append(permission_constraint)
 
             return NextConfiguration(self),
+
+    def step_until_branch(self, pe_ids: Iterable[int]) -> Tuple[StepResult, ...]:
+        """
+        Run the specified PEs in sequence and return immediately if branching happens.
+        If all given PEs are not fireable, return ()
+        Otherwise return a single NextConfiguration
+        """
+        
+        updated = False
+
+        for pe_id in pe_ids:
+            results = self.step_exhaust(pe_id)
+
+            if len(results) == 1:
+                assert isinstance(results[0], NextConfiguration)
+                self = results[0].config
+                updated = True
+            
+            elif len(results) > 1:
+                # branching, return immediately
+                return results
+            
+            # otherwise if no step, continue
+            
+        if updated:
+            return NextConfiguration(self),
+
+        return ()

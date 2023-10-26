@@ -5,7 +5,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 
 
-WORD_WIDTH = 32 # addresses are 32-bit
+WORD_WIDTH = 32 # addresses are 32-bit to avoid translation from/to dataflow memory
 BYTE_WIDTH = 8
 
 
@@ -109,6 +109,8 @@ class Function(ASTNode):
     blocks: OrderedDict[str, BasicBlock]
     definitions: OrderedDict[str, Instruction] = field(init=False)
 
+    module: Optional[Module] = None
+
     def __post_init__(self):
         self.definitions = OrderedDict()
 
@@ -121,6 +123,7 @@ class Function(ASTNode):
                     self.definitions[name] = instruction
 
     def resolve_uses(self, module: Module):
+        self.module = module
         for block in self.blocks.values():
             for instruction in block.instructions:
                 instruction.resolve_uses(self)

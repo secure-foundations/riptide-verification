@@ -121,6 +121,9 @@ class Configuration:
 
         assert isinstance(result, MatchingSuccess)
 
+        assert self.memory.is_symbol()
+        result.substitution[self.memory] = other.memory
+
         # TODO: this is ignoring memory constraints
         substituted_path_conditions = (
             path_condition.substitute(result.substitution)

@@ -45,6 +45,10 @@ class ASTTransformer(Transformer[ASTNode]):
     def mul_instruction(self, args: List[Any]) -> MulInstruction:
         typ = args[1]
         return MulInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def and_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return AndInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
 
     def icmp_instruction(self, args: List[Any]) -> IntegerCompareInstruction:
         typ = args[2]
@@ -198,6 +202,7 @@ class Parser:
         
         instruction: add_instruction
                    | mul_instruction
+                   | and_instruction
                    | icmp_instruction
                    | select_instruction
                    | getelementptr_instruction
@@ -211,6 +216,7 @@ class Parser:
 
         add_instruction: variable "=" "add" ["nuw"] ["nsw"] integer_type value "," value
         mul_instruction: variable "=" "mul" ["nuw"] ["nsw"] integer_type value "," value
+        and_instruction: variable "=" "and" integer_type value "," value
 
         icmp_instruction: variable "=" "icmp" ICMP_CONDITION type value "," value
         ICMP_CONDITION.1: /eq|ne|ugt|uge|ult|ule|sgt|sge|slt|sle/

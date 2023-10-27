@@ -61,8 +61,12 @@ class DataflowGraph:
         vertices: List[ProcessingElement] = []
         channels: List[Channel] = []
 
-        found_function_argument_names: Set[str] = set()
+        function_argument_names: Set[str] = set()
         function_arguments: List[FunctionArgument] = []
+
+        for arg_obj in obj["function"]["args"]:
+            function_argument_names.add(arg_obj["name"])
+            function_arguments.append(FunctionArgument(arg_obj["name"]))
 
         for i, vertex in enumerate(obj["vertices"]):
             assert i == vertex["ID"]
@@ -89,12 +93,9 @@ class DataflowGraph:
                     output_channels[input_pe_id][input_pe_port].append(channel)
 
                 elif input["type"] == "xdata":
+                    assert input["name"] in function_argument_names
                     function_arg = FunctionArgument(input["name"])
                     channel = Channel(channel_id, None, None, i, port, function_arg, input["hold"])
-
-                    if input["name"] not in found_function_argument_names:
-                        found_function_argument_names.add(input["name"])
-                        function_arguments.append(function_arg)
 
                 elif input["type"] == "const":
                     channel = Channel(channel_id, None, None, i, port, ConstantValue(input["value"]), input["hold"])

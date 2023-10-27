@@ -21,7 +21,6 @@ def main():
     #     loop_header_hints = [
     #         LoopHeaderHint(
     #             "for.cond", "for.inc",
-    #             # tuple(llvm_function.definitions.keys()),
     #             (),
     #         ),
     #     ]
@@ -35,37 +34,85 @@ def main():
     #     loop_header_hints = [
     #         LoopHeaderHint(
     #             "for.cond", "for.body",
-    #             # ("%smax17", "%1", "%inc"),
     #             (),
     #         ),
     #         LoopHeaderHint(
     #             "for.cond2", "for.body5",
-    #             # ("%smax17", "%lso.alloc.0.lcssa", "%inc8"),
     #             (("%lso.alloc.0", "%lso.alloc.0.lcssa"),),
     #         ),
     #     ]
 
-    with open("examples/test-9/test.test-9.o2p") as dataflow_source:
+    # with open("examples/test-9/test.test-9.o2p") as dataflow_source:
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+        
+    # with open("examples/test-9/test.test-9.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
+    #     loop_header_hints = [
+    #         LoopHeaderHint(
+    #             "for.cond", "for.cond.cleanup3",
+    #             (("%lso.alloc3.1", "%lso.alloc3.1.lcssa"), ("%lso.alloc.1", "%lso.alloc.1.lcssa")),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond1", "for.body4",
+    #             (),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond11", "for.body14",
+    #             (("%lso.alloc.0", "%lso.alloc.0.lcssa"),),
+    #         ),
+    #     ]
+
+    # TODO: doesn't work
+    # with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+        
+    # with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
+    #     loop_header_hints = [
+    #         LoopHeaderHint(
+    #             "while.cond", "while.cond.loopexit",
+    #             (),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond", "if.end",
+    #             (),
+    #         ),
+    #     ]
+
+    # TODO: doesn't work
+    # with open("examples/dmm/dmm.dmm.o2p") as dataflow_source:
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+        
+    # with open("examples/dmm/dmm.dmm.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
+    #     loop_header_hints = [
+    #         LoopHeaderHint(
+    #             "for.cond", "for.cond.cleanup3",
+    #             (),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond1", "for.cond.cleanup7",
+    #             (),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond5", "for.body8",
+    #             (),
+    #         ),
+    #     ]
+
+    with open("examples/fft_ns0/fft_ns0.fft_ns0.o2p") as dataflow_source:
         dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
-    with open("examples/test-9/test.test-9.lso.ll") as llvm_source:
+    with open("examples/fft_ns0/fft_ns0.fft_ns0.lso.ll") as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
         llvm_function = tuple(llvm_module.functions.values())[0]
         loop_header_hints = [
             LoopHeaderHint(
-                "for.cond", "for.cond.cleanup3",
-                # ("%smax34", "%lso.alloc.1.lcssa", "%lso.alloc3.1.lcssa", "%inc8"),
-                (("%lso.alloc3.1", "%lso.alloc3.1.lcssa"), ("%lso.alloc.1", "%lso.alloc.1.lcssa")),
-            ),
-            LoopHeaderHint(
-                "for.cond1", "for.body4",
-                # ("%smax34", "%4", "%add", "%inc", "%i.0", "%arrayidx", "%1"),
+                "for.cond", "for.body",
                 (),
-            ),
-            LoopHeaderHint(
-                "for.cond11", "for.body14",
-                # ("%smax34", "%inc17", "%lso.alloc.0.lcssa"),
-                (("%lso.alloc.0", "%lso.alloc.0.lcssa"),),
             ),
         ]
 

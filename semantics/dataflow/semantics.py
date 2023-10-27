@@ -77,6 +77,13 @@ class AddOperator(Operator):
         return smt.BVAdd(a, b)
     
 
+@Operator.implement("ARITH_CFG_OP_AND")
+class AndOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        # print("plus", a, b)
+        return smt.BVAnd(a, b)
+
+
 @Operator.implement("ARITH_CFG_OP_GEP")
 class GEPOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):

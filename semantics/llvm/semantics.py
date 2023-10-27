@@ -286,6 +286,14 @@ class Configuration:
             self.current_instr_counter += 1
             return NextConfiguration(self),
     
+        elif isinstance(instr, AndInstruction):
+            self.set_variable(instr.name, smt.BVAnd(
+                self.eval_value(instr.left),
+                self.eval_value(instr.right),
+            ))
+            self.current_instr_counter += 1
+            return NextConfiguration(self),
+
         elif isinstance(instr, IntegerCompareInstruction):
             if instr.cond == "eq":
                 result = smt.Equals(

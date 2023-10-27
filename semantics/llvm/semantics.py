@@ -180,6 +180,9 @@ class Configuration:
     def get_variable(self, name: str) -> smt.SMTTerm:
         assert name in self.variables, f"variable {name} not defined"
         return self.variables[name]
+    
+    def has_variable(self, name: str) -> bool:
+        return name in self.variables
 
     def eval_value(self, value: Value) -> smt.SMTTerm:
         if isinstance(value, IntegerConstant):

@@ -533,6 +533,8 @@ class SimulationChecker:
         # Mapping from llvm var name |-> generalized dataflow variables corresponding to it
         llvm_var_correspondence: OrderedDict[str, List[smt.SMTTerm]] = OrderedDict()
 
+        llvm_cut_point = self.llvm_cut_points[branch.llvm_branch.to_cut_point]
+
         # Mirror the operator states
         for pe_id, operator in enumerate(branch.config.operator_states):
             cut_point.operator_states[pe_id].transition_to(operator.current_transition)
@@ -545,13 +547,15 @@ class SimulationChecker:
                 if producer_llvm_var is not None:
                     sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
                     fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
+                    cut_point.operator_states[pe_id].value = fresh_var
+
+                    assert llvm_cut_point.has_variable(producer_llvm_var),\
+                           f"corresponding llvm var {producer_llvm_var} of an invariant value at PE {pe_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
                     if producer_llvm_var not in llvm_var_correspondence:
                         llvm_var_correspondence[producer_llvm_var] = []
                     llvm_var_correspondence[producer_llvm_var].append(fresh_var)
                 else:
-                    assert False, f"cannot find an llvm variable corresponding to an inv value in PE {pe_id}"
-
-                cut_point.operator_states[pe_id].value = fresh_var
+                    assert False, f"cannot find an llvm variable corresponding to an invariant value in PE {pe_id}"
 
         # Generalize the channel states
         for channel_id, channel_state in enumerate(branch.config.channel_states):
@@ -595,18 +599,25 @@ class SimulationChecker:
                 if producer_llvm_var is not None:
                     sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
                     fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
+                    cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, dummy_permission))
 
+                    assert llvm_cut_point.has_variable(producer_llvm_var), \
+                           f"corresponding llvm var {producer_llvm_var} of channel {channel_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
                     if producer_llvm_var not in llvm_var_correspondence:
                         llvm_var_correspondence[producer_llvm_var] = []
                     llvm_var_correspondence[producer_llvm_var].append(fresh_var)
                 else:
-                    assert False, f"cannot find an llvm variable corresponding to a value in channel {channel.id}"
-
-                cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, dummy_permission))
+                    if channel.source is None:
+                        # An unused constant value
+                        cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(
+                            branch.config.channel_states[channel_id].peek().term,
+                            dummy_permission,
+                        ))
+                    else:
+                        assert False, f"cannot find an llvm variable corresponding to a value in channel {channel.id}"
 
         # Construct a Correspondence object
         assert branch.llvm_branch.to_cut_point is not None
-        llvm_cut_point = self.llvm_cut_points[branch.llvm_branch.to_cut_point]
         correspondence = self.get_init_correspondence(cut_point, llvm_cut_point)
         correspondence.var_correspondence = tuple(
             (dataflow_var, llvm_cut_point.get_variable(llvm_var_name))

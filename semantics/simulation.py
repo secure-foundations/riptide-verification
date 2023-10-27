@@ -17,7 +17,7 @@ import semantics.llvm as llvm
 class LoopHeaderHint:
     block_name: str
     prev_block: str
-    live_vars: Tuple[str, ...] # live variables (excluding parameters)
+    # live_vars: Tuple[str, ...] # live variables (excluding parameters)
     lcssa_vars: Tuple[Tuple[str, str], ...] # pairs of (original var, lcssa var)
 
 
@@ -153,33 +153,36 @@ class SimulationChecker:
         # For each loop header, generate LLVM cut point and a placeholder for dataflow cut point
         for header_info in loop_header_hints:
             self.dataflow_cut_points.append(None)
-            llvm_cut_point = llvm.Configuration(
-                self.llvm_function.module,
-                self.llvm_function,
-                current_block=header_info.block_name,
-                previous_block=header_info.prev_block,
-                current_instr_counter=0,
-                variables=OrderedDict([
-                    # Free variables for parameters
-                    *(
-                        (param.name, smt.FreshSymbol(
-                            SimulationChecker.llvm_type_to_smt_type(param.type),
-                            f"llvm_param_{SimulationChecker.sanitize_llvm_name(param.name)}_%d",
-                        ))
-                        for param in self.llvm_function.parameters.values()
-                    ),
+            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+            llvm_cut_point.current_block = header_info.block_name
+            llvm_cut_point.previous_block = header_info.prev_block
+            # llvm_cut_point = llvm.Configuration(
+            #     self.llvm_function.module,
+            #     self.llvm_function,
+            #     current_block=header_info.block_name,
+            #     previous_block=header_info.prev_block,
+            #     current_instr_counter=0,
+            #     variables=OrderedDict([
+            #         # Free variables for parameters
+            #         *(
+            #             (param.name, smt.FreshSymbol(
+            #                 SimulationChecker.llvm_type_to_smt_type(param.type),
+            #                 f"llvm_param_{SimulationChecker.sanitize_llvm_name(param.name)}_%d",
+            #             ))
+            #             for param in self.llvm_function.parameters.values()
+            #         ),
 
-                    # Free variables for live variables
-                    *(
-                        (live_var_name, smt.FreshSymbol(
-                            SimulationChecker.llvm_type_to_smt_type(self.llvm_function.definitions[live_var_name].get_type()),
-                            f"llvm_var_{SimulationChecker.sanitize_llvm_name(live_var_name)}_%d",
-                        ))
-                        for live_var_name in header_info.live_vars
-                    ),
-                ]),
-                path_conditions=[],
-            )
+            #         # Free variables for live variables
+            #         *(
+            #             (live_var_name, smt.FreshSymbol(
+            #                 SimulationChecker.llvm_type_to_smt_type(self.llvm_function.definitions[live_var_name].get_type()),
+            #                 f"llvm_var_{SimulationChecker.sanitize_llvm_name(live_var_name)}_%d",
+            #             ))
+            #             for live_var_name in header_info.live_vars
+            #         ),
+            #     ]),
+            #     path_conditions=[],
+            # )
 
             for original_var_name, lcssa_var_name in header_info.lcssa_vars:
                 llvm_cut_point.set_variable(original_var_name, llvm_cut_point.get_variable(lcssa_var_name))

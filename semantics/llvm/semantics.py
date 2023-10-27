@@ -139,9 +139,13 @@ class Configuration:
     def get_initial_configuration(module: Module, function: Function) -> Configuration:
         variables = OrderedDict()
 
+        # TODO: right now this only supports pointers and integers
+
         for parameter in function.parameters.values():
-            # TODO: right now this only supports pointers and integers
             variables[parameter.name] = smt.FreshSymbol(smt.BVType(parameter.get_type().get_bit_width()), "llvm_param_" + parameter.name.replace(".", "_").strip("%") + "_%d")
+
+        for var, instr in function.definitions.items():
+            variables[var] = smt.FreshSymbol(smt.BVType(instr.get_type().get_bit_width()), "llvm_var_" + var.replace(".", "_").strip("%") + "_%d")
 
         return Configuration(
             module=module,

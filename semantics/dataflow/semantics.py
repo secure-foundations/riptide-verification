@@ -128,6 +128,20 @@ class SelectOperator(Operator):
         return b
 
 
+@Operator.implement("CF_CFG_OP_MERGE")
+class MergeOperator(Operator):
+    def start(self, config: Configuration, decider: ChannelId(0)) -> Branching:
+        return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), MergeOperator.false, MergeOperator.true)
+    
+    def true(self, config: Configuration, a: ChannelId(1)) -> ChannelId(0):
+        self.transition_to(MergeOperator.start)
+        return a
+
+    def false(self, config: Configuration, b: ChannelId(2)) -> ChannelId(0):
+        self.transition_to(MergeOperator.start)
+        return b
+
+
 @Operator.implement("CF_CFG_OP_CARRY")
 class CarryOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(1)) -> ChannelId(0):

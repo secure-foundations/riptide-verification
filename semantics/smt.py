@@ -1,4 +1,4 @@
-from typing import Any, Callable, Tuple, Generator, Iterable, Optional
+from typing import Any, Callable, Tuple, Generator, Iterable, Optional, List
 
 from contextlib import contextmanager
 
@@ -93,6 +93,29 @@ def check_implication(a: Iterable[SMTTerm], b: Iterable[SMTTerm], solver: Option
                 solver.add_assertion(term)
             solver.add_assertion(Not(And(*b)))
             return not solver.solve()
+
+
+def find_implication_blame(a: Iterable[SMTTerm], b: Iterable[SMTTerm], solver: Optional[Solver] = None) -> Tuple[SMTTerm, ...]:
+    """
+    find a list of terms in b that are not implied by a
+    """
+    if solver is None:
+        with Solver(name="z3") as solver:
+            return find_implication_blame(a, b, solver)
+    else:
+        with push_solver(solver):
+            for term in a:
+                solver.add_assertion(term)
+
+            blame: List[SMTTerm] = []
+
+            for term in b:
+                with push_solver(solver):
+                    solver.add_assertion(Not(term))
+                    if solver.solve():
+                        blame.append(term)
+
+            return blame
 
 
 @contextmanager

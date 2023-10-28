@@ -855,7 +855,7 @@ class Configuration:
 
             return NextConfiguration(self),
 
-    def step_until_branch(self, pe_ids: Iterable[int]) -> Tuple[StepResult, ...]:
+    def step_until_branch(self, pe_ids: Iterable[int], exhaust: bool = True) -> Tuple[StepResult, ...]:
         """
         Run the specified PEs in sequence and return immediately if branching happens.
         If all given PEs are not fireable, return ()
@@ -865,7 +865,7 @@ class Configuration:
         updated = False
 
         for pe_id in pe_ids:
-            results = self.step_exhaust(pe_id)
+            results = self.step_exhaust(pe_id) if exhaust else self.step(pe_id)
 
             if len(results) == 1:
                 assert isinstance(results[0], NextConfiguration)

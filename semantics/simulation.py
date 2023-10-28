@@ -120,6 +120,13 @@ class SimulationChecker:
             if pe.operator == "CF_CFG_OP_STEER" or pe.operator == "CF_CFG_OP_INVARIANT"
         )
 
+        # Find all carry gates
+        self.carry_pe_ids = tuple(
+            pe.id
+            for pe in dataflow_graph.vertices
+            if pe.operator == "CF_CFG_OP_CARRY"
+        )
+
         # Set up initial configs
         assert len(self.llvm_function.parameters) == len(self.dataflow_graph.function_arguments)
 
@@ -287,6 +294,41 @@ class SimulationChecker:
 
         assert len(llvm_branches) > 0, f"dataflow config {config} has no matching llvm branches"
 
+        def run_misc_operators() -> Optional[Tuple[DataflowBranch, ...]]:
+            nonlocal config
+
+            while True:
+                changed = False
+
+                # Run steer/inv gates until stuck
+                results = config.step_until_branch(self.steer_inv_pe_ids)
+                if len(results) == 1:
+                    changed = True
+                    config = results[0].config
+                elif len(results) > 1:
+                    return branch(results)
+
+                # Step on all carry gates with a decider value
+                results = config.step_until_branch(
+                    (
+                        pe_id
+                        for pe_id in self.carry_pe_ids
+                        if config.operator_states[pe_id].current_transition == dataflow.CarryOperator.loop
+                    ),
+                    exhaust=False,
+                )
+                if len(results) == 1:
+                    changed = True
+                    config = results[0].config
+                elif len(results) > 1:
+                    print("branch in carry")
+                    return branch(results)
+                
+                if not changed:
+                    break
+
+            return None
+
         def branch(results: Tuple[dataflow.StepResult, ...]) -> Tuple[DataflowBranch, ...]:
             assert len(results) == 2 and \
                    isinstance(results[0], dataflow.NextConfiguration) and \
@@ -302,23 +344,18 @@ class SimulationChecker:
             # Other operators:
             # - Steer: always fire when available
             # - Inv: always fire when available (tentative, or run when the destination is fired)
-            
-            # Run steer/inv gates until stuck
-            while True:
-                results = config.step_until_branch(self.steer_inv_pe_ids)
-                if len(results) == 0:
-                    break
-                elif len(results) > 1:
-                    return branch(results)
-                else:
-                    config = results[0].config
+        
+            dataflow_branches = run_misc_operators()
+            if dataflow_branches:
+                return dataflow_branches
 
             # Base case: exactly one llvm branch
             if len(llvm_branches) == 1 and trace_counter >= len(llvm_branches[0].trace):
                 return DataflowBranch(config, None, llvm_branches[0]),
 
-            assert len(set(branch.trace[trace_counter] for branch in llvm_branches)) == 1, \
-                   f"early in the llvm branches as trace counter {trace_counter}"
+            possible_llvm_positions = set(branch.trace[trace_counter] for branch in llvm_branches)
+            assert len(possible_llvm_positions) == 1, \
+                   f"dataflow did not branch but llvm branches at trace counter {trace_counter}: {possible_llvm_positions}"
 
             # Run the corresponding pe at trace_counter
             position = llvm_branches[0].trace[trace_counter]
@@ -330,23 +367,17 @@ class SimulationChecker:
                 continue
             
             results = config.step_until_branch((pe_id,))
-            if len(results) == 0:
-                self.debug_common(config)
-                assert False, f"PE {pe_id} corresponding to llvm instruction {position} not ready when scheduled to fire"
+            if len(results) == 1:
+                config = results[0].config
             elif len(results) > 1:
                 return branch(results)
             else:
-                config = results[0].config
+                self.debug_common(config)
+                assert False, f"PE {pe_id} corresponding to llvm instruction {position} not ready when scheduled to fire"
 
-            # Run steer/inv gates again until stuck
-            while True:
-                results = config.step_until_branch(self.steer_inv_pe_ids)
-                if len(results) == 0:
-                    break
-                elif len(results) > 1:
-                    return branch(results)
-                else:
-                    config = results[0].config
+            dataflow_branches = run_misc_operators()
+            if dataflow_branches:
+                return dataflow_branches
 
     def find_non_steer_inv_producer(self, channel_id: int) -> Optional[int]:
         """
@@ -381,67 +412,49 @@ class SimulationChecker:
 
         return None
     
+    def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):
+        llvm_branch = dataflow_branch.llvm_branch
+        self.debug_common(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")
+    
+        source_correspondence = self.correspondence[llvm_branch.from_cut_point]
+        source_correspondence_smt = source_correspondence.to_smt_terms()
+
+        obligations = [
+            # Path condition equivalence
+            smt.Iff(
+                smt.And(*dataflow_branch.config.path_conditions),
+                smt.And(*llvm_branch.config.path_conditions),
+            )
+        ]
+
+        if llvm_branch.to_cut_point is not None:
+            target_correspondence = self.correspondence[llvm_branch.to_cut_point]
+            assert dataflow_branch.match_result is not None
+            assert llvm_branch.match_result is not None
+            obligations.extend(target_correspondence.get_matching_obligations(dataflow_branch.match_result, llvm_branch.match_result))
+        else:
+            # Correspondence at the final state is simply the memory equality
+            obligations.append(smt.Equals(dataflow_branch.config.memory, llvm_branch.config.memory))
+
+        if not smt.check_implication(source_correspondence_smt, obligations):
+            blame = smt.find_implication_blame(source_correspondence_smt, obligations)
+            self.debug_common("knows:", source_correspondence)
+            self.debug_common("blame:", blame)
+            assert False, f"a branch from {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'} fails the bisimulation obligations"
+
+
     def check_bisimulation(self):
         """
         Check if all the matched dataflow/llvm branches satisfy cut point correspondence (thus establishing a bisimulation)
         """
-
         for j in range(self.num_cut_points):
-            source_correspondence = self.correspondence[j]
-            source_correspondence_smt = source_correspondence.to_smt_terms()
-            
             for i in range(self.num_cut_points):
-                target_correspondence = self.correspondence[i]
-
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
-                    self.debug_common(f"checking bisimulation obligations for a branch from cut point {j} to {i}")
-
-                    llvm_branch = dataflow_branch.llvm_branch
-
-                    assert dataflow_branch.match_result is not None
-                    assert llvm_branch.match_result is not None
-
-                    if not smt.check_implication(
-                        source_correspondence_smt,
-                        (
-                            # Path condition equivalence
-                            smt.Iff(
-                                smt.And(*dataflow_branch.config.path_conditions),
-                                smt.And(*llvm_branch.config.path_conditions),
-                            ),
-
-                            # Satisfies the correspondence at the cut point
-                            *target_correspondence.get_matching_obligations(dataflow_branch.match_result, llvm_branch.match_result),
-                        ),
-                    ):
-                        assert False, f"a branch from {i} to {j} fails the bisimulation obligations"
+                    self.check_branch_bisimulation_obligation(dataflow_branch)
 
         for i in range(self.num_cut_points):
-            source_correspondence_smt = self.correspondence[i].to_smt_terms()
-
             for dataflow_branch in self.final_dataflow_branches[i]:
-                self.debug_common(f"checking bisimulation obligations for a branch from cut point {i} to ⊥")
-
-                llvm_branch = dataflow_branch.llvm_branch
-                
-                # the corresponding llvm branch should also be a final branch
-                assert dataflow_branch.match_result is None
-                assert llvm_branch.match_result is None
-
-                if not smt.check_implication(
-                    source_correspondence_smt,
-                    (
-                        # Path condition equivalence
-                        smt.Iff(
-                            smt.And(*dataflow_branch.config.path_conditions),
-                            smt.And(*llvm_branch.config.path_conditions),
-                        ),
-
-                        # Correspondence at the final state is simply the memory equality
-                        smt.Equals(dataflow_branch.config.memory, llvm_branch.config.memory),
-                    ),
-                ):
-                    assert False, f"a branch from {i} to ⊥ fails the bisimulation obligations"
+                self.check_branch_bisimulation_obligation(dataflow_branch)
 
     def check_dataflow_matches(self):
         """
@@ -457,7 +470,7 @@ class SimulationChecker:
                     self.debug_dataflow(f"checking a matched branch from cut point {j} to {i}")
                     match_result = target_dataflow_cut_point.match(dataflow_branch.config)
                     assert isinstance(match_result, MatchingSuccess), \
-                           f"failed to match an expected dataflow branch from  cut point {j} to {i}"
+                           f"failed to match an expected dataflow branch from cut point {j} to {i}: {match_result.reason}"
                     assert match_result.check_condition(), "unexpected matching failure"
                     dataflow_branch.match_result = match_result
 

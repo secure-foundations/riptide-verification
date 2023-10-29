@@ -264,15 +264,20 @@ class SimulationChecker:
         correspondence_smt = correspondence.to_smt_terms()
 
         for branch in llvm_branches:
+            branch_conditions = tuple(branch.config.path_conditions) + correspondence_smt
+
             # Check if LLVM branch path condition /\ correspondence => dataflow branch path condition
-            if smt.check_implication(tuple(branch.config.path_conditions) + correspondence_smt, left.path_conditions):
+            if smt.check_implication(branch_conditions, left.path_conditions):
                 left_branches.append(branch)
-            elif smt.check_implication(tuple(branch.config.path_conditions) + correspondence_smt, right.path_conditions):
+            elif smt.check_implication(branch_conditions, right.path_conditions):
                 right_branches.append(branch)
             else:
+                blame_left = smt.find_implication_blame(branch_conditions, left.path_conditions)
+                blame_right = smt.find_implication_blame(branch_conditions, right.path_conditions)
                 self.debug_common(f"correspondence: {correspondence}")
                 self.debug_common(f"llvm branch path conditions: {branch.config.path_conditions}")
-                self.debug_common(f"dataflow branch path conditions: {left.path_conditions}")
+                self.debug_common(f"left blame:", blame_left)
+                self.debug_common(f"right blame:", blame_right)
                 assert False, f"failed to categorize a llvm branch into neither dataflow branches"
 
         return left_branches, right_branches

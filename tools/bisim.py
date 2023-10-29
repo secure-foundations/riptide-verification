@@ -63,44 +63,43 @@ def main():
     #         ),
     #     ]
 
-    # TODO: doesn't work
-    # with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
-    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
-    # with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
-    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
-    #     llvm_function = tuple(llvm_module.functions.values())[0]
-    #     loop_header_hints = [
-    #         LoopHeaderHint(
-    #             "while.cond", "while.cond.loopexit",
-    #             (),
-    #         ),
-    #         LoopHeaderHint(
-    #             "for.cond", "if.end",
-    #             (),
-    #         ),
-    #     ]
-
-    with open("examples/dmm/dmm.dmm.o2p") as dataflow_source:
+    with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
         dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
-    with open("examples/dmm/dmm.dmm.lso.ll") as llvm_source:
+    with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
         llvm_function = tuple(llvm_module.functions.values())[0]
         loop_header_hints = [
             LoopHeaderHint(
-                "for.cond", "for.cond.cleanup3",
-                (("%dest_idx.1", "%dest_idx.1.lcssa"),),
+                "while.cond", "while.cond.loopexit",
+                (("%lso.alloc2.1", "%lso.alloc2.1.lcssa"), ("%lso.alloc3.1", "%lso.alloc3.1.lcssa"), ("%queue_back.1", "%queue_back.1.lcssa")),
             ),
             LoopHeaderHint(
-                "for.cond1", "for.cond.cleanup7",
-                (),
-            ),
-            LoopHeaderHint(
-                "for.cond5", "for.body8",
+                "for.cond", "if.end",
                 (),
             ),
         ]
+
+    # with open("examples/dmm/dmm.dmm.o2p") as dataflow_source:
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+        
+    # with open("examples/dmm/dmm.dmm.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
+    #     loop_header_hints = [
+    #         LoopHeaderHint(
+    #             "for.cond", "for.cond.cleanup3",
+    #             (("%dest_idx.1", "%dest_idx.1.lcssa"),),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond1", "for.cond.cleanup7",
+    #             (),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond5", "for.body8",
+    #             (),
+    #         ),
+    #     ]
 
     # with open("examples/fft_ns0/fft_ns0.fft_ns0.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))

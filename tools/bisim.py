@@ -3,6 +3,8 @@ from dataclasses import dataclass
 
 import json
 
+from argparse import ArgumentParser
+
 import semantics.smt as smt
 from semantics.matching import *
 from semantics.simulation import SimulationChecker, LoopHeaderHint
@@ -63,22 +65,35 @@ def main():
     #         ),
     #     ]
 
-    with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
-        dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+    # with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
         
-    with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
-        llvm_module = llvm.Parser.parse_module(llvm_source.read())
-        llvm_function = tuple(llvm_module.functions.values())[0]
-        loop_header_hints = [
-            LoopHeaderHint(
-                "while.cond", "while.cond.loopexit",
-                (("%lso.alloc2.1", "%lso.alloc2.1.lcssa"), ("%lso.alloc3.1", "%lso.alloc3.1.lcssa"), ("%queue_back.1", "%queue_back.1.lcssa")),
-            ),
-            LoopHeaderHint(
-                "for.cond", "if.end",
-                (),
-            ),
-        ]
+    # with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
+    #     loop_header_hints = [
+    #         LoopHeaderHint(
+    #             "while.cond", "while.cond.loopexit",
+    #             (("%lso.alloc2.1", "%lso.alloc2.1.lcssa"), ("%lso.alloc3.1", "%lso.alloc3.1.lcssa"), ("%queue_back.1", "%queue_back.1.lcssa")),
+    #         ),
+    #         LoopHeaderHint(
+    #             "for.cond", "if.end",
+    #             (),
+    #         ),
+    #     ]
+
+    # with open("examples/dfs/bfs.dfs.o2p") as dataflow_source:
+    #     dataflow_graph_json = json.load(dataflow_source)
+    #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(dataflow_graph_json)
+
+    #     loop_header_hints = [
+    #         LoopHeaderHint(loop["header"], loop["back_edge"], ())
+    #         for loop in dataflow_graph_json["function"]["loops"]
+    #     ]
+        
+    # with open("examples/dfs/bfs.dfs.lso.ll") as llvm_source:
+    #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
+    #     llvm_function = tuple(llvm_module.functions.values())[0]
 
     # with open("examples/dmm/dmm.dmm.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
@@ -130,6 +145,24 @@ def main():
     #             (),
     #         ),
     #     ]
+
+    parser = ArgumentParser()
+    parser.add_argument("o2p", help="Annotated o2p file")
+    parser.add_argument("lso_ll", help="LLVM code after lso")
+    args = parser.parse_args()
+
+    with open(args.o2p) as dataflow_source:
+        dataflow_graph_json = json.load(dataflow_source)
+        dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(dataflow_graph_json)
+        loop_header_hints = [
+            LoopHeaderHint(loop["header"], loop["back_edge"], ())
+            for loop in dataflow_graph_json["function"]["loops"]
+        ]
+        
+    with open(args.lso_ll) as llvm_source:
+        llvm_module = llvm.Parser.parse_module(llvm_source.read())
+        assert len(llvm_module.functions) == 1
+        llvm_function = tuple(llvm_module.functions.values())[0]
 
     sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints)
     sim_checker.match_llvm_branches()

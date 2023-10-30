@@ -64,6 +64,12 @@ class Operator:
             return MatchingFailure(f"unmatched transition at operator {self.pe.id}")
 
 
+@Operator.implement("ARITH_CFG_OP_ID")
+class IdOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0)) -> ChannelId(0):
+        return a
+
+
 @Operator.implement("ARITH_CFG_OP_EQ")
 class EqOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
@@ -80,8 +86,37 @@ class AddOperator(Operator):
 @Operator.implement("ARITH_CFG_OP_AND")
 class AndOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
-        # print("plus", a, b)
         return smt.BVAnd(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_OR")
+class OrOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVOr(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_XOR")
+class XorOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVXor(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_SHL")
+class ShlOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVLShl(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_LSHR")
+class LshrOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVLShr(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_ASHR")
+class AshrOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVAShr(a, b)
 
 
 @Operator.implement("ARITH_CFG_OP_GEP")
@@ -448,6 +483,8 @@ class Configuration:
     permission_constraints: List[permission.Formula] = field(default_factory=list)
     permission_var_count: int = 0
 
+    solver: Optional[smt.Solver] = None
+
     def match(self, other: Configuration) -> MatchingResult:
         """
         Treat self as a pattern and match other against self
@@ -525,11 +562,11 @@ class Configuration:
         ))
 
     @staticmethod
-    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm]):
+    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None):
         initial_permissions: List[permission.PermissionVariable] = []
         hold_permissions: List[permission.PermissionVariable] = []
 
-        config = Configuration(graph, free_vars)
+        config = Configuration(graph, free_vars, solver=solver)
 
         # Initialize operator implementations
         operator_states: List[Operator] = []
@@ -596,6 +633,7 @@ class Configuration:
             list(self.path_conditions),
             list(self.permission_constraints),
             self.permission_var_count,
+            self.solver,
         )
 
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
@@ -614,11 +652,7 @@ class Configuration:
         return PermissionedValue(value, self.get_fresh_permission_var())
 
     def check_feasibility(self) -> bool:
-        with smt.Solver(name="z3") as solver:
-            for path_condition in self.path_conditions:
-                solver.add_assertion(path_condition)
-            # true for sat, false for unsat
-            return solver.solve()
+        return smt.check_sat(self.path_conditions, self.solver)
 
     def get_transition_input_channels(self, pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
         signature = inspect.signature(transition, eval_str=True)

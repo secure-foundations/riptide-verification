@@ -27,6 +27,11 @@ OPERATOR_INFO = {
         "dot_label": "nop",
         "dot_attr": _DOT_CIRCLE_ATTR,
     },
+    "ARITH_CFG_OP_ID": {
+        "dot_label": "id",
+        "dot_attr": _DOT_CIRCLE_ATTR,
+        **_BINARY_ARITH_PORT_POSITIONS,
+    },
     "ARITH_CFG_OP_ADD": {
         "dot_label": "+",
         "dot_attr": _DOT_CIRCLE_ATTR,

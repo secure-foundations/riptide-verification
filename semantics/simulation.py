@@ -102,6 +102,8 @@ class SimulationChecker:
         debug: bool = True,
     ):
         self.debug = debug
+        self.solver = smt.Solver(name="z3", random_seed=0)
+
         self.dataflow_graph = dataflow_graph
         self.llvm_function = llvm_function
         self.loop_header_hints = tuple(loop_header_hints)
@@ -135,8 +137,8 @@ class SimulationChecker:
             for function_arg in self.dataflow_graph.function_arguments
         )
 
-        dataflow_init_config = dataflow.Configuration.get_initial_configuration(self.dataflow_graph, self.dataflow_params)
-        llvm_init_config = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+        dataflow_init_config = dataflow.Configuration.get_initial_configuration(self.dataflow_graph, self.dataflow_params, self.solver)
+        llvm_init_config = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
 
         self.num_cut_points = 1 + len(loop_header_hints)
         self.dataflow_cut_points: List[Optional[dataflow.Configuration]] = [ dataflow_init_config ]
@@ -160,36 +162,9 @@ class SimulationChecker:
         # For each loop header, generate LLVM cut point and a placeholder for dataflow cut point
         for header_info in loop_header_hints:
             self.dataflow_cut_points.append(None)
-            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
             llvm_cut_point.current_block = header_info.block_name
             llvm_cut_point.previous_block = header_info.prev_block
-            # llvm_cut_point = llvm.Configuration(
-            #     self.llvm_function.module,
-            #     self.llvm_function,
-            #     current_block=header_info.block_name,
-            #     previous_block=header_info.prev_block,
-            #     current_instr_counter=0,
-            #     variables=OrderedDict([
-            #         # Free variables for parameters
-            #         *(
-            #             (param.name, smt.FreshSymbol(
-            #                 SimulationChecker.llvm_type_to_smt_type(param.type),
-            #                 f"llvm_param_{SimulationChecker.sanitize_llvm_name(param.name)}_%d",
-            #             ))
-            #             for param in self.llvm_function.parameters.values()
-            #         ),
-
-            #         # Free variables for live variables
-            #         *(
-            #             (live_var_name, smt.FreshSymbol(
-            #                 SimulationChecker.llvm_type_to_smt_type(self.llvm_function.definitions[live_var_name].get_type()),
-            #                 f"llvm_var_{SimulationChecker.sanitize_llvm_name(live_var_name)}_%d",
-            #             ))
-            #             for live_var_name in header_info.live_vars
-            #         ),
-            #     ]),
-            #     path_conditions=[],
-            # )
 
             for original_var_name, lcssa_var_name in header_info.lcssa_vars:
                 llvm_cut_point.set_variable(original_var_name, llvm_cut_point.get_variable(lcssa_var_name))
@@ -267,13 +242,13 @@ class SimulationChecker:
             branch_conditions = tuple(branch.config.path_conditions) + correspondence_smt
 
             # Check if LLVM branch path condition /\ correspondence => dataflow branch path condition
-            if smt.check_implication(branch_conditions, left.path_conditions):
+            if smt.check_implication(branch_conditions, left.path_conditions, self.solver):
                 left_branches.append(branch)
-            elif smt.check_implication(branch_conditions, right.path_conditions):
+            elif smt.check_implication(branch_conditions, right.path_conditions, self.solver):
                 right_branches.append(branch)
             else:
-                blame_left = smt.find_implication_blame(branch_conditions, left.path_conditions)
-                blame_right = smt.find_implication_blame(branch_conditions, right.path_conditions)
+                blame_left = smt.find_implication_blame(branch_conditions, left.path_conditions, self.solver)
+                blame_right = smt.find_implication_blame(branch_conditions, right.path_conditions, self.solver)
                 self.debug_common(f"correspondence: {correspondence}")
                 self.debug_common(f"llvm branch path conditions: {branch.config.path_conditions}")
                 self.debug_common(f"left blame:", blame_left)
@@ -441,12 +416,11 @@ class SimulationChecker:
             # Correspondence at the final state is simply the memory equality
             obligations.append(smt.Equals(dataflow_branch.config.memory, llvm_branch.config.memory))
 
-        if not smt.check_implication(source_correspondence_smt, obligations):
-            blame = smt.find_implication_blame(source_correspondence_smt, obligations)
+        if not smt.check_implication(source_correspondence_smt, obligations, self.solver):
+            blame = smt.find_implication_blame(source_correspondence_smt, obligations, self.solver)
             self.debug_common("knows:", source_correspondence)
             self.debug_common("blame:", blame)
             assert False, f"a branch from {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'} fails the bisimulation obligations"
-
 
     def check_bisimulation(self):
         """
@@ -604,9 +578,9 @@ class SimulationChecker:
                 # print(config.path_conditions)
                 decider_term = branch.config.channel_states[channel_id].peek().term
 
-                if smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(1, dataflow.WORD_WIDTH)),)):
+                if smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(1, dataflow.WORD_WIDTH)),), self.solver):
                     decider_value = smt.BVConst(1, dataflow.WORD_WIDTH)
-                elif smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(0, dataflow.WORD_WIDTH)),)):
+                elif smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(0, dataflow.WORD_WIDTH)),), self.solver):
                     decider_value = smt.BVConst(0, dataflow.WORD_WIDTH)
                 else:
                     assert False, f"cannot determine a constant decider value {decider_term} from path conditions {branch.config.path_conditions}"

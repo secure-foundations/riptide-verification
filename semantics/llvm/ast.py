@@ -299,6 +299,126 @@ class AndInstruction(Instruction):
 
 
 @dataclass
+class OrInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = or {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
+class XorInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = xor {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
+class ShlInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = shl {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
+class LshrInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = lshr {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
+class AshrInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = ashr {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
 class MulInstruction(Instruction):
     name: str
     type: Type

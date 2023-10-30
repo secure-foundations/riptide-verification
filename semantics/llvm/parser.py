@@ -49,6 +49,26 @@ class ASTTransformer(Transformer[ASTNode]):
     def and_instruction(self, args: List[Any]) -> AddInstruction:
         typ = args[1]
         return AndInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def or_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return OrInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def xor_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return XorInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def shl_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return ShlInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def lshr_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return LshrInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+    
+    def ashr_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return AshrInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
 
     def icmp_instruction(self, args: List[Any]) -> IntegerCompareInstruction:
         typ = args[2]
@@ -168,7 +188,7 @@ class Parser:
         %ignore INLINE_COMMENT
         %ignore /[ \n\t\f\r]+/
 
-        INTEGER: /0|[1-9][0-9]*/
+        INTEGER: /-?(0|[1-9][0-9]*)/
         INTEGER_TYPE: /i[1-9][0-9]*/
         VARIABLE: /(%|@)((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/
         BLOCK_LABEL: /[A-Za-z][A-Za-z0-9-_'.]*:/
@@ -203,6 +223,11 @@ class Parser:
         instruction: add_instruction
                    | mul_instruction
                    | and_instruction
+                   | or_instruction
+                   | xor_instruction
+                   | shl_instruction
+                   | lshr_instruction
+                   | ashr_instruction
                    | icmp_instruction
                    | select_instruction
                    | getelementptr_instruction
@@ -216,8 +241,14 @@ class Parser:
 
         add_instruction: variable "=" "add" ["nuw"] ["nsw"] integer_type value "," value
         mul_instruction: variable "=" "mul" ["nuw"] ["nsw"] integer_type value "," value
+        
         and_instruction: variable "=" "and" integer_type value "," value
-
+        or_instruction: variable "=" "or" integer_type value "," value
+        xor_instruction: variable "=" "xor" integer_type value "," value
+        shl_instruction: variable "=" "shl" ["nuw"] ["nsw"] integer_type value "," value
+        lshr_instruction: variable "=" "lshr" ["exact"] integer_type value "," value
+        ashr_instruction: variable "=" "ashr" ["exact"] integer_type value "," value
+        
         icmp_instruction: variable "=" "icmp" ICMP_CONDITION type value "," value
         ICMP_CONDITION.1: /eq|ne|ugt|uge|ult|ule|sgt|sge|slt|sle/
 

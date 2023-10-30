@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Callable
 from dataclasses import dataclass
 
 import semantics.smt as smt
@@ -53,6 +53,8 @@ class Configuration:
     # For book keeping purposes
     memory_updates: List[MemoryUpdate] = field(default_factory=list)
     memory: smt.SMTTerm = field(default_factory=lambda: Configuration.get_fresh_memory_var())
+
+    solver: Optional[smt.Solver] = None
 
     def __str__(self) -> str:
         lines = []
@@ -136,7 +138,7 @@ class Configuration:
         ))
 
     @staticmethod
-    def get_initial_configuration(module: Module, function: Function) -> Configuration:
+    def get_initial_configuration(module: Module, function: Function, solver: Optional[smt.Solevr] = None) -> Configuration:
         variables = OrderedDict()
 
         # TODO: right now this only supports pointers and integers
@@ -155,6 +157,7 @@ class Configuration:
             current_instr_counter=0,
             variables=variables,
             path_conditions=[],
+            solver=solver,
         )
     
     @staticmethod
@@ -173,6 +176,7 @@ class Configuration:
             list(self.path_conditions),
             list(self.memory_updates),
             self.memory,
+            self.solver,
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -202,11 +206,7 @@ class Configuration:
             assert False, f"evaluation of {value} not implemented"
 
     def check_feasibility(self) -> bool:
-        with smt.Solver(name="z3") as solver:
-            for path_condition in self.path_conditions:
-                solver.add_assertion(path_condition)
-            # true for sat (i.e. feasible), false for unsat
-            return solver.solve()
+        return smt.check_sat(self.path_conditions, self.solver)
 
     def store_memory(self, location: smt.SMTTerm, value: smt.SMTTerm, bit_width: int) -> None:
         """
@@ -270,24 +270,20 @@ class Configuration:
 
         instr = self.get_current_instruction()
 
-        if isinstance(instr, AddInstruction):
-            self.set_variable(instr.name, smt.BVAdd(
-                self.eval_value(instr.left),
-                self.eval_value(instr.right),
-            ))
-            self.current_instr_counter += 1
-            return NextConfiguration(self),
+        binary_op_semantics: Dict[str, Callable[[smt.SMTTerm, smt.SMTTerm], smt.SMTTerm]] = {
+            AddInstruction: smt.BVAdd,
+            MulInstruction: smt.BVMul,
+            AndInstruction: smt.BVAnd,
+            OrInstruction: smt.BVOr,
+            XorInstruction: smt.BVXor,
+            ShlInstruction: smt.BVLShl,
+            LshrInstruction: smt.BVLShr,
+            AshrInstruction: smt.BVAShr,
+        }
 
-        elif isinstance(instr, MulInstruction):
-            self.set_variable(instr.name, smt.BVMul(
-                self.eval_value(instr.left),
-                self.eval_value(instr.right),
-            ))
-            self.current_instr_counter += 1
-            return NextConfiguration(self),
-    
-        elif isinstance(instr, AndInstruction):
-            self.set_variable(instr.name, smt.BVAnd(
+        if instr.__class__ in binary_op_semantics:
+            func = binary_op_semantics[instr.__class__]
+            self.set_variable(instr.name, func(
                 self.eval_value(instr.left),
                 self.eval_value(instr.right),
             ))

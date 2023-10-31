@@ -40,7 +40,7 @@ class Operator:
             Operator.OPERATOR_IMPL_MAP[name] = cls
             return cls
         return wrapper
-    
+
     def __init__(self, pe: ProcessingElement, permission: permission.PermissionVariable, transition: Optional[TransitionFunction] = None):
         self.pe = pe
         self.internal_permission: permission.PermissionVariable = permission
@@ -51,7 +51,7 @@ class Operator:
 
     def start(self, config: Configuration):
         raise NotImplementedError()
-    
+
     def copy(self) -> Operator:
         return type(self)(self.pe, self.internal_permission, self.current_transition)
 
@@ -81,7 +81,7 @@ class AddOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         # print("plus", a, b)
         return smt.BVAdd(a, b)
-    
+
 
 @Operator.implement("ARITH_CFG_OP_AND")
 class AndOperator(Operator):
@@ -123,14 +123,14 @@ class AshrOperator(Operator):
 class GEPOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.BVAdd(a, b)
-    
+
 
 @Operator.implement("MUL_CFG_OP_MUL")
 class MulOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         # print("mul", a, b)
         return smt.BVMul(a, b)
-    
+
 
 @Operator.implement("ARITH_CFG_OP_SGT")
 class SignedGreaterThanOperator(Operator):
@@ -160,7 +160,7 @@ class UnsignedLessThanOperator(Operator):
 class SelectOperator(Operator):
     def start(self, config: Configuration, decider: ChannelId(0)) -> Branching:
         return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), SelectOperator.false, SelectOperator.true)
-    
+
     def true(self, config: Configuration, a: ChannelId(1), b: ChannelId(2)) -> ChannelId(0):
         self.transition_to(SelectOperator.start)
         return a
@@ -174,7 +174,7 @@ class SelectOperator(Operator):
 class MergeOperator(Operator):
     def start(self, config: Configuration, decider: ChannelId(0)) -> Branching:
         return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), MergeOperator.false, MergeOperator.true)
-    
+
     def true(self, config: Configuration, a: ChannelId(1)) -> ChannelId(0):
         self.transition_to(MergeOperator.start)
         return a
@@ -189,7 +189,7 @@ class CarryOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(1)) -> ChannelId(0):
         self.transition_to(CarryOperator.loop)
         return a
-    
+
     def loop(self, config: Configuration, decider: ChannelId(0)) -> Branching:
         if self.pe.pred == "CF_CFG_PRED_FALSE":
             return Branching(smt.Equals(decider, smt.BVConst(0, WORD_WIDTH)), CarryOperator.pass_b, CarryOperator.start)
@@ -216,7 +216,7 @@ class SteerOperator(Operator):
     def pass_value(self, config: Configuration, value: ChannelId(1)) -> ChannelId(0):
         self.transition_to(SteerOperator.start)
         return value
-    
+
     def discard_value(self, config: Configuration, value: ChannelId(1)):
         self.transition_to(SteerOperator.start)
 
@@ -231,7 +231,7 @@ class InvariantOperator(Operator):
         copied = super().copy()
         copied.value = self.value
         return copied
-    
+
     def match(self, other: Operator) -> MatchingResult:
         result = super().match(other)
         assert isinstance(other, InvariantOperator)
@@ -247,7 +247,7 @@ class InvariantOperator(Operator):
         self.transition_to(InvariantOperator.loop)
         self.value = value
         return value
-    
+
     def clear(self, config: Configuration):
         self.value = None
         self.transition_to(InvariantOperator.start)
@@ -275,7 +275,7 @@ class StreamOperator(Operator):
 
     def match(self, other: Operator) -> MatchingResult:
         raise NotImplementedError()
-    
+
     def copy(self) -> StreamOperator:
         copied = super().copy()
         copied.current = self.current
@@ -306,7 +306,7 @@ class StreamOperator(Operator):
             return smt.BVConst(0, WORD_WIDTH)
         else:
             assert False, f"unknown pred {self.pe.pred}"
-    
+
     def not_done(self, config: Configuration, step: ChannelId(2)) -> Tuple[ChannelId(0), ChannelId(1)]:
         current = self.current
         self.current = smt.BVAdd(self.current, step)
@@ -328,13 +328,13 @@ class StreamOperator(Operator):
 class StoreOperator(Operator):
     def __init__(self, *args):
         super().__init__(*args)
-        
+
         if len(self.pe.inputs) == 3:
             self.transition_to(StoreOperator.start_3)
-        
+
         elif len(self.pe.inputs) == 4:
             self.transition_to(StoreOperator.start_4)
-        
+
         else:
             assert False, "unexpected number of input channels to the store operator"
 
@@ -351,13 +351,13 @@ class StoreOperator(Operator):
 class LoadOperator(Operator):
     def __init__(self, *args):
         super().__init__(*args)
-        
+
         if len(self.pe.inputs) == 2:
             self.transition_to(LoadOperator.start_2)
-        
+
         elif len(self.pe.inputs) == 3:
             self.transition_to(LoadOperator.start_3)
-        
+
         else:
             assert False, "unexpected number of input channels to the store operator"
 
@@ -396,7 +396,7 @@ class ChannelState:
 
         assert len(self.values) != 0, "popping an empty channel"
         return self.values.pop(0)
-    
+
     def peek(self) -> PermissionedValue:
         if self.hold_constant is not None:
             return self.hold_constant
@@ -410,7 +410,7 @@ class ChannelState:
 
     def ready(self) -> bool:
         return self.hold_constant is not None or len(self.values) != 0
-    
+
     def count(self) -> int:
         assert self.hold_constant is None
         return len(self.values)
@@ -424,7 +424,7 @@ class ChannelState:
 class WildcardChannelState(ChannelState):
     def pop(self) -> PermissionedValue:
         assert False, "cannot pop from a wildcard channel state"
-    
+
     def peek(self) -> PermissionedValue:
         assert False, "cannot peek a wildcard channel state"
 
@@ -528,7 +528,7 @@ class Configuration:
 
                 if self_channel.hold_constant is None != other_channel.hold_constant is None:
                     return MatchingFailure(f"unmatched hold constant at channel {i}")
-                
+
                 if self_channel.hold_constant is None:
                     if len(self_channel.values) != len(other_channel.values):
                         return MatchingFailure(f"unmatched channel queue length at channel {i} ({len(self_channel.values)} vs {len(other_channel.values)})")
@@ -555,7 +555,7 @@ class Configuration:
             path_condition.substitute(result.substitution)
             for path_condition in self.path_conditions
         )
-        
+
         return MatchingSuccess(result.substitution, smt.Implies(
             smt.And(*other.path_conditions),
             smt.And(result.condition, *substituted_path_conditions),
@@ -585,7 +585,7 @@ class Configuration:
             if channel.constant is not None:
                 if isinstance(channel.constant, ConstantValue):
                     value = config.get_fresh_permissioned_value(smt.BVConst(channel.constant.value, WORD_WIDTH))
-                
+
                 else:
                     assert isinstance(channel.constant, FunctionArgument)
                     name = channel.constant.variable_name
@@ -597,7 +597,7 @@ class Configuration:
                 if channel.hold:
                     state = ChannelState(value)
                     hold_permissions.append(value.permission)
-                
+
                 else:
                     state = ChannelState()
                     state.push(value)
@@ -657,7 +657,7 @@ class Configuration:
     def get_transition_input_channels(self, pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
         signature = inspect.signature(transition, eval_str=True)
         channel_ids = []
-        
+
         for i, (name, channel_param) in enumerate(signature.parameters.items()):
             if i == 0:
                 assert name == "self", f"ill-formed first transition parameter {channel_param}"
@@ -669,7 +669,7 @@ class Configuration:
                 channel_ids.append(channel_id)
 
         return tuple(channel_ids)
-    
+
     def get_transition_output_actions(self, transition: TransitionFunction) -> Tuple[Any, ...]:
         return_annotation = inspect.signature(transition, eval_str=True).return_annotation
 
@@ -678,10 +678,10 @@ class Configuration:
 
         elif isinstance(return_annotation, ChannelId):
             return return_annotation,
-    
+
         elif return_annotation is inspect.Signature.empty:
             return ()
-        
+
         elif "__origin__" in dir(return_annotation) and return_annotation.__origin__ is tuple:
             return tuple(return_annotation.__args__)
 
@@ -695,7 +695,7 @@ class Configuration:
 
         for operator_state in self.operator_states:
             lines.append(f"  {operator_state.pe.id}: {operator_state.__class__.__name__}@{operator_state.current_transition.__name__}")
-        
+
         lines.append("channel states:")
 
         for id, channel_state in enumerate(self.channel_states):
@@ -708,7 +708,7 @@ class Configuration:
                     lines.append(f"  {id}:")
                     for value in channel_state.values:
                         lines.append(f"    {value}")
-        
+
         lines.append(f"memory updates:")
         for update in self.memory_updates:
             lines.append(f"  {update}")
@@ -749,12 +749,12 @@ class Configuration:
 
             elif isinstance(result, StepException):
                 final_results.append(result)
-            
+
             else:
                 assert False, f"unexpected step result {result}"
 
         return tuple(final_results)
-    
+
     def is_fireable(self, pe_id: int) -> bool:
         pe_info = self.graph.vertices[pe_id]
         operator_state = self.operator_states[pe_info.id]
@@ -767,8 +767,36 @@ class Configuration:
             if not self.channel_states[channel_id].ready():
                 # Channel not ready
                 return False
-            
+
         return True
+
+    def find_function_argument_producers(self, channel_id: int) -> Tuple[str, ...]:
+        """
+        Find the constant producer of the channel modulo +, gep, inv, steer, carry, merge, select
+        """
+        channel = self.graph.channels[channel_id]
+
+        if channel.constant:
+            if isinstance(channel.constant, FunctionArgument):
+                return channel.constant.variable_name,
+            else:
+                return ()
+
+        assert channel.source is not None
+        source_pe = self.graph.vertices[channel.source]
+
+        if source_pe.operator in { "CF_CFG_OP_STEER", "CF_CFG_OP_INVARIANT", "CF_CFG_OP_CARRY" }:
+            return self.find_function_argument_producers(source_pe.inputs[1].id)
+
+        elif source_pe.operator in { "CF_CFG_OP_SELECT", "CF_CFG_OP_MERGE" }:
+            return self.find_function_argument_producers(source_pe.inputs[1].id) + \
+                   self.find_function_argument_producers(source_pe.inputs[2].id)
+
+        elif source_pe.operator in { "ARITH_CFG_OP_ADD", "ARITH_CFG_OP_GEP" }:
+            return self.find_function_argument_producers(source_pe.inputs[0].id) + \
+                   self.find_function_argument_producers(source_pe.inputs[1].id)
+
+        return ()
 
     def step(self, pe_id: int) -> Tuple[StepResult, ...]:
         """
@@ -776,7 +804,7 @@ class Configuration:
         Returns () if no transition is possible,
         Otherwise return a tuple of results
         """
-        
+
         pe_info = self.graph.vertices[pe_id]
         operator_state = self.operator_states[pe_info.id]
         transition = operator_state.current_transition
@@ -814,21 +842,23 @@ class Configuration:
         # If the operation is a store or load
         # Add additional permission constraint of read/write A <= input permissions
         if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
-            if isinstance(pe_info.inputs[0].constant, FunctionArgument):
+            base_pointers = self.find_function_argument_producers(pe_info.inputs[0].id)
 
-                # TODO: right now we assume that the base is always one of the free variables
-                assert isinstance(pe_info.inputs[0].constant, FunctionArgument)
-                var_name = pe_info.inputs[0].constant.variable_name
-                assert var_name in self.free_vars
-
+            if len(base_pointers) != 0:
                 if isinstance(operator_state, LoadOperator):
-                    mem_permission = permission.ReadPermission(var_name)
+                    mem_permission = permission.DisjointUnion.of(
+                        permission.ReadPermission(base_pointer)
+                        for base_pointer in base_pointers
+                    )
                 else:
-                    mem_permission = permission.WritePermission(var_name)
-                
+                    mem_permission = permission.DisjointUnion.of(
+                        permission.WritePermission(base_pointer)
+                        for base_pointer in base_pointers
+                    )
+
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:
-                print("FIXME: unsupported permission for store/load")
+                assert False, "unsupported permission for store/load"
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"internal-{pe_info.id}-")
@@ -895,7 +925,7 @@ class Configuration:
         If all given PEs are not fireable, return ()
         Otherwise return a single NextConfiguration
         """
-        
+
         updated = False
 
         for pe_id in pe_ids:
@@ -905,13 +935,13 @@ class Configuration:
                 assert isinstance(results[0], NextConfiguration)
                 self = results[0].config
                 updated = True
-            
+
             elif len(results) > 1:
                 # branching, return immediately
                 return results
-            
+
             # otherwise if no step, continue
-            
+
         if updated:
             return NextConfiguration(self),
 

@@ -16,7 +16,7 @@ import semantics.llvm as llvm
 def main():
     # with open("examples/test-7/test.test-7.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/test-7/test.test-7.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -29,7 +29,7 @@ def main():
 
     # with open("examples/test-8/test.test-8.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/test-8/test.test-8.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -46,7 +46,7 @@ def main():
 
     # with open("examples/test-9/test.test-9.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/test-9/test.test-9.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -67,7 +67,7 @@ def main():
 
     # with open("examples/bfs/bfs.bfs.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/bfs/bfs.bfs.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -90,14 +90,14 @@ def main():
     #         LoopHeaderHint(loop["header"], loop["back_edge"], ())
     #         for loop in dataflow_graph_json["function"]["loops"]
     #     ]
-        
+
     # with open("examples/dfs/bfs.dfs.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
 
     # with open("examples/dmm/dmm.dmm.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/dmm/dmm.dmm.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -118,7 +118,7 @@ def main():
 
     # with open("examples/fft_ns0/fft_ns0.fft_ns0.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/fft_ns0/fft_ns0.fft_ns0.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -131,7 +131,7 @@ def main():
 
     # with open("examples/test-11/test.test-11.o2p") as dataflow_source:
     #     dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
-        
+
     # with open("examples/test-11/test.test-11.lso.ll") as llvm_source:
     #     llvm_module = llvm.Parser.parse_module(llvm_source.read())
     #     llvm_function = tuple(llvm_module.functions.values())[0]
@@ -158,7 +158,7 @@ def main():
             LoopHeaderHint(loop["header"], loop["back_edge"], ())
             for loop in dataflow_graph_json["function"]["loops"]
         ]
-        
+
     with open(args.lso_ll) as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
         assert len(llvm_module.functions) == 1

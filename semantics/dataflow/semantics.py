@@ -846,15 +846,15 @@ class Configuration:
 
             if len(base_pointers) != 0:
                 if isinstance(operator_state, LoadOperator):
-                    mem_permission = permission.DisjointUnion.of(
+                    mem_permission = permission.DisjointUnion.of(*(
                         permission.ReadPermission(base_pointer)
                         for base_pointer in base_pointers
-                    )
+                    ))
                 else:
-                    mem_permission = permission.DisjointUnion.of(
+                    mem_permission = permission.DisjointUnion.of(*(
                         permission.WritePermission(base_pointer)
                         for base_pointer in base_pointers
-                    )
+                    ))
 
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:

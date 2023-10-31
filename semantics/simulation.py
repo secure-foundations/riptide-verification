@@ -58,7 +58,7 @@ class Correspondence:
 
     def to_smt_term(self) -> smt.SMTTerm:
         return smt.And(*self.to_smt_terms())
-    
+
     def get_matching_obligations(self, dataflow_match: MatchingSuccess, llvm_match: MatchingSuccess) -> Tuple[smt.SMTTerm, ...]:
         """
         Get the equalities after substitutions in dataflow_match and llvm_match
@@ -83,15 +83,15 @@ class SimulationChecker:
             name = name[1:]
         name = name.replace(".", "_")
         return name
-    
+
     @staticmethod
     def llvm_type_to_smt_type(type: llvm.Type) -> smt.SMTTerm:
         if isinstance(type, llvm.IntegerType):
             return smt.BVType(type.bit_width)
-        
+
         elif isinstance(type, llvm.PointerType):
             return smt.BVType(llvm.WORD_WIDTH)
-        
+
         assert False, f"unsupported llvm type {type}"
 
     def __init__(
@@ -199,7 +199,7 @@ class SimulationChecker:
             queue: List[Tuple[llvm.Configuration, Tuple[Tuple[str, int], ...]]] = [
                 (llvm_cut_point.copy(), ()),
             ]
-        
+
             while len(queue) != 0:
                 config, trace = queue.pop(0)
                 current_position = (config.current_block, config.current_instr_counter)
@@ -303,7 +303,7 @@ class SimulationChecker:
                 elif len(results) > 1:
                     print("branch in carry")
                     return branch(results)
-                
+
                 if not changed:
                     break
 
@@ -324,7 +324,7 @@ class SimulationChecker:
             # Other operators:
             # - Steer: always fire when available
             # - Inv: always fire when available (tentative, or run when the destination is fired)
-        
+
             dataflow_branches = run_misc_operators()
             if dataflow_branches:
                 return dataflow_branches
@@ -345,7 +345,7 @@ class SimulationChecker:
             if pe_id is None:
                 # This instruction might have been coalesced into other PEs
                 continue
-            
+
             results = config.step_until_branch((pe_id,))
             if len(results) == 1:
                 config = results[0].config
@@ -374,7 +374,7 @@ class SimulationChecker:
             return self.find_non_steer_inv_producer(source_pe.inputs[1].id)
         else:
             return source_pe.id
-    
+
     def find_non_steer_inv_producer_llvm_var(self, channel_id: int) -> Optional[str]:
         """
         Find the llvm variable name of the actual producer of a value in channel_id
@@ -391,11 +391,11 @@ class SimulationChecker:
                 return defined_var
 
         return None
-    
+
     def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):
         llvm_branch = dataflow_branch.llvm_branch
         self.debug_common(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")
-    
+
         source_correspondence = self.correspondence[llvm_branch.from_cut_point]
         source_correspondence_smt = source_correspondence.to_smt_terms()
 
@@ -478,7 +478,7 @@ class SimulationChecker:
 
         assert not self.dataflow_cut_points_executed[cut_point_index]
         self.dataflow_cut_points_executed[cut_point_index] = True
- 
+
         dataflow_cut_point = self.dataflow_cut_points[cut_point_index]
         correspondence = self.correspondence[cut_point_index]
 

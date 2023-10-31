@@ -275,6 +275,30 @@ class AddInstruction(Instruction):
     
 
 @dataclass
+class MulInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = mul {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
 class AndInstruction(Instruction):
     name: str
     type: Type
@@ -419,27 +443,49 @@ class AshrInstruction(Instruction):
 
 
 @dataclass
-class MulInstruction(Instruction):
+class ZextInstruction(Instruction):
     name: str
-    type: Type
-    left: Value
-    right: Value
+    from_type: IntegerType
+    to_type: IntegerType
+    value: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.value = self.value.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = zext {self.from_type} {self.left} to {self.to_type}"
+
+    def get_type(self) -> Type:
+        return self.to_type
+
+    def __str__(self) -> str:
+        return f"{self.to_type} {self.name}"
+
+
+@dataclass
+class SextInstruction(Instruction):
+    name: str
+    from_type: IntegerType
+    to_type: IntegerType
+    value: Value
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
     
     def resolve_uses(self, function: Function) -> None:
-        self.left = self.left.resolve_uses(function)
-        self.right = self.right.resolve_uses(function)
+        self.value = self.value.resolve_uses(function)
 
     def get_full_string(self) -> str:
-        return f"{self.name} = mul {self.type}, {self.left}, {self.right}"
+        return f"{self.name} = sext {self.from_type} {self.left} to {self.to_type}"
 
     def get_type(self) -> Type:
-        return self.type
+        return self.to_type
 
     def __str__(self) -> str:
-        return f"{self.type} {self.name}"
+        return f"{self.to_type} {self.name}"
 
 
 @dataclass

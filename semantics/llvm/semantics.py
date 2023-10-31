@@ -87,12 +87,12 @@ class Configuration:
         """
         Use self as a pattern and try to find an assignment to variables
         in self so that self = other
-        
+
         This assumes some constraints on self:
         - memory_updates should be empty
         - all SMT terms in variables are SMT variables or have
           free variables contained in the other configuration
-        
+
         Returns (if successful) the matching substitution
         and a condition for the matching to be valid ("other.path_condition => self.path_condition")
         all variables in this condition is implicitly universally quantified
@@ -101,22 +101,22 @@ class Configuration:
 
         assert self.module == other.module and self.function == other.function
         assert len(self.memory_updates) == 0
-        
+
         if self.current_block != other.current_block:
             return MatchingFailure("unmatched current block")
-        
+
         if self.previous_block != other.previous_block:
             return MatchingFailure("unmatched previous block")
-        
+
         if self.current_instr_counter != other.current_instr_counter:
             return MatchingFailure("unmatched instruction counter")
-        
+
         result = MatchingSuccess()
 
         for var_name, term in self.variables.items():
             if var_name not in other.variables:
                 return MatchingFailure(f"variable {var_name} is not defined")
-            
+
             result = result.merge(MatchingResult.match_smt_terms(term, other.variables[var_name]))
             if isinstance(result, MatchingFailure):
                 return result
@@ -131,7 +131,7 @@ class Configuration:
             path_condition.substitute(result.substitution)
             for path_condition in self.path_conditions
         )
-        
+
         return MatchingSuccess(result.substitution, smt.Implies(
             smt.And(*other.path_conditions),
             smt.And(result.condition, *substituted_path_conditions),
@@ -159,7 +159,7 @@ class Configuration:
             path_conditions=[],
             solver=solver,
         )
-    
+
     @staticmethod
     def get_fresh_memory_var() -> smt.SMTTerm:
         # return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(BYTE_WIDTH)))
@@ -188,7 +188,7 @@ class Configuration:
     def get_variable(self, name: str) -> smt.SMTTerm:
         assert name in self.variables, f"variable {name} not defined"
         return self.variables[name]
-    
+
     def has_variable(self, name: str) -> bool:
         return name in self.variables
 
@@ -198,7 +198,7 @@ class Configuration:
 
         elif isinstance(value, Instruction):
             return self.get_variable(value.get_defined_variable())
-        
+
         elif isinstance(value, FunctionParameter):
             return self.get_variable(value.name)
 
@@ -235,7 +235,7 @@ class Configuration:
         #         smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)),
         #         smt.BVExtract(extended_value, i * BYTE_WIDTH, i * BYTE_WIDTH + BYTE_WIDTH - 1),
         #     )
-    
+
     def load_memory(self, location: smt.SMTTerm, bit_width: int) -> smt.SMTTerm:
         """
         Load a BV of width bit_width starting from the `location`
@@ -251,7 +251,7 @@ class Configuration:
         #     smt.Select(self.memory_var, smt.BVAdd(location, smt.BVConst(i, WORD_WIDTH)))
         #     for i in range(aligned_bit_width // BYTE_WIDTH)
         # )
-        
+
         # value = smt.BVConcat(*read_bytes)
 
         # return smt.BVExtract(value, 0, bit_width - 1).simplify()
@@ -290,13 +290,31 @@ class Configuration:
             self.current_instr_counter += 1
             return NextConfiguration(self),
 
+        elif isinstance(instr, ZextInstruction):
+            assert instr.to_type.bit_width >= instr.from_type.bit_width
+            self.set_variable(instr.name, smt.BVZExt(
+                self.eval_value(instr.value),
+                instr.to_type.bit_width - instr.from_type.bit_width,
+            ))
+            self.current_instr_counter += 1
+            return NextConfiguration(self),
+
+        elif isinstance(instr, SextInstruction):
+            assert instr.to_type.bit_width >= instr.from_type.bit_width
+            self.set_variable(instr.name, smt.BVSExt(
+                self.eval_value(instr.value),
+                instr.to_type.bit_width - instr.from_type.bit_width,
+            ))
+            self.current_instr_counter += 1
+            return NextConfiguration(self),
+
         elif isinstance(instr, IntegerCompareInstruction):
             if instr.cond == "eq":
                 result = smt.Equals(
                     self.eval_value(instr.left),
                     self.eval_value(instr.right),
                 )
-            
+
             elif instr.cond == "sgt":
                 result = smt.BVSGT(
                     self.eval_value(instr.left),
@@ -315,7 +333,7 @@ class Configuration:
             self.set_variable(instr.name, smt.Ite(result, smt.BVConst(1, 1), smt.BVConst(0, 1)))
             self.current_instr_counter += 1
             return NextConfiguration(self),
-    
+
         elif isinstance(instr, GetElementPointerInstruction):
             pointer = self.eval_value(instr.pointer)
 
@@ -348,7 +366,7 @@ class Configuration:
             self.current_instr_counter += 1
 
             return NextConfiguration(self),
-    
+
         elif isinstance(instr, LoadInstruction):
             bit_width = instr.base_type.get_bit_width()
             self.set_variable(
@@ -363,7 +381,7 @@ class Configuration:
             self.store_memory(self.eval_value(instr.dest), self.eval_value(instr.value), bit_width)
             self.current_instr_counter += 1
             return NextConfiguration(self),
-    
+
         elif isinstance(instr, SelectInstruction):
             cond = smt.Equals(self.eval_value(instr.cond), smt.BVConst(0, 1))
 
@@ -383,7 +401,7 @@ class Configuration:
             if not other.check_feasibility():
                 self.path_conditions.pop()
                 return NextConfiguration(self),
-            
+
             return NextConfiguration(self), NextConfiguration(other)
 
         elif isinstance(instr, CallInstruction):
@@ -403,7 +421,7 @@ class Configuration:
                 self.set_variable(instr.name, smt.BVConst(1, 32))
                 self.current_instr_counter += 1
                 return NextConfiguration(self),
-            
+
             else:
                 assert False, f"function {instr.function_name} not implemented"
 
@@ -413,7 +431,7 @@ class Configuration:
             self.set_variable(instr.name, self.eval_value(instr.branches[self.previous_block].value))
             self.current_instr_counter += 1
             return NextConfiguration(self),
-    
+
         elif isinstance(instr, JumpInstruction):
             self.previous_block = self.current_block
             self.current_block = instr.label
@@ -431,7 +449,7 @@ class Configuration:
 
             self.current_block = instr.true_label
             other.current_block = instr.false_label
-            
+
             self.path_conditions.append(smt.Not(cond).simplify())
             other.path_conditions.append(cond.simplify())
 
@@ -443,7 +461,7 @@ class Configuration:
             if not other.check_feasibility():
                 self.path_conditions.pop()
                 return NextConfiguration(self),
-            
+
             return NextConfiguration(self), NextConfiguration(other)
 
         elif isinstance(instr, ReturnInstruction):

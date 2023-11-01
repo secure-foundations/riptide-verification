@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple, Optional, List, Generator, Type, Dict, Mapping, Any, Set, Callable, Iterable
+from typing import Tuple, Optional, List, Generator, Type, Dict, Mapping, Any, Set, Callable, Iterable, Union
 from dataclasses import dataclass, field
 from collections import OrderedDict
 
@@ -33,13 +33,18 @@ class Branching:
 
 class Operator:
     OPERATOR_IMPL_MAP: Dict[str, Type[Operator]] = {}
+    OPERATOR_IMPL_USE_ANNOTATED_VALUE: Dict[str, bool] = {}
 
     @staticmethod
-    def implement(name: str):
+    def implement(name: str, use_annotated_value: bool = True):
         def wrapper(cls: Type[Operator]):
             Operator.OPERATOR_IMPL_MAP[name] = cls
+            Operator.OPERATOR_IMPL_USE_ANNOTATED_VALUE[name] = use_annotated_value
             return cls
         return wrapper
+
+    def use_annotated_value(self) -> bool:
+        return Operator.OPERATOR_IMPL_USE_ANNOTATED_VALUE[self.__class__.__name__]
 
     def __init__(self, pe: ProcessingElement, permission: permission.PermissionVariable, transition: Optional[TransitionFunction] = None):
         self.pe = pe
@@ -225,7 +230,7 @@ class SteerOperator(Operator):
 class InvariantOperator(Operator):
     def __init__(self, *args):
         super().__init__(*args)
-        self.value: Optional[smt.SMTTerm] = None
+        self.value: Optional[AnnotatedSMTTerm] = None
 
     def copy(self) -> InvariantOperator:
         copied = super().copy()
@@ -375,8 +380,20 @@ class WildcardOperator(Operator):
 
 
 @dataclass
-class PermissionedValue:
+class AnnotatedSMTTerm:
     term: smt.SMTTerm
+    base_pointer: List[str] = field(default_factory=list)
+
+    def simplify(self) -> AnnotatedSMTTerm:
+        return AnnotatedSMTTerm(self.term.simplify(), self.base_pointer)
+
+    def __str__(self) -> str:
+        return str(self.term)
+
+
+@dataclass
+class PermissionedValue:
+    term: AnnotatedSMTTerm
     permission: permission.PermissionVariable
 
     def __str__(self) -> str:
@@ -481,10 +498,11 @@ class Configuration:
     path_conditions: List[smt.SMTTerm] = field(default_factory=list)
 
     permission_constraints: List[permission.Formula] = field(default_factory=list)
+    permission_var_count: int = 0
 
     solver: Optional[smt.Solver] = None
 
-    def match(self, other: Configuration) -> Tuple[MatchingResult, Optional[Tuple[permission.Formula, ...]]]:
+    def match(self, other: Configuration) -> MatchingResult:
         """
         Treat self as a pattern and match other against self
 
@@ -493,7 +511,7 @@ class Configuration:
         - free_var is empty
         - memory_updates is empty
 
-        An additional list of permission equality is returned
+        TODO: handle permissions
         """
 
         assert self.graph == other.graph
@@ -501,8 +519,6 @@ class Configuration:
         assert len(self.memory_updates) == 0
 
         result = MatchingSuccess()
-
-        permission_equalities: List[permission.Formula] = []
 
         # Match operator states
         assert len(self.operator_states) == len(other.operator_states)
@@ -515,9 +531,7 @@ class Configuration:
                 assert not isinstance(other_op, WildcardOperator)
                 result = result.merge(self_op.match(other_op))
                 if isinstance(result, MatchingFailure):
-                    return result, None
-
-                permission_equalities.append(permission.Equality(self_op.internal_permission, other_op.internal_permission))
+                    return result
 
         # Match channel states
         assert len(self.channel_states) == len(other.channel_states)
@@ -530,25 +544,23 @@ class Configuration:
                 assert not isinstance(other_channel, WildcardChannelState)
 
                 if self_channel.hold_constant is None != other_channel.hold_constant is None:
-                    return MatchingFailure(f"unmatched hold constant at channel {i}"), None
+                    return MatchingFailure(f"unmatched hold constant at channel {i}")
 
                 if self_channel.hold_constant is None:
                     if len(self_channel.values) != len(other_channel.values):
                         return MatchingFailure(f"unmatched channel queue length at channel {i} ({len(self_channel.values)} vs {len(other_channel.values)})")
                     else:
                         for self_value, other_value in zip(self_channel.values, other_channel.values):
-                            result = result.merge(MatchingResult.match_smt_terms(self_value.term, other_value.term))
+                            result = result.merge(MatchingResult.match_smt_terms(self_value.term.term, other_value.term.term))
                             if isinstance(result, MatchingFailure):
-                                return result, None
-                            permission_equalities.append(permission.Equality(self_value.permission, other_value.permission))
+                                return result
                 else:
                     result = result.merge(MatchingSuccess(condition=smt.Equals(
-                        self_channel.hold_constant.term,
-                        other_channel.hold_constant.term,
+                        self_channel.hold_constant.term.term,
+                        other_channel.hold_constant.term.term,
                     )))
-                    permission_equalities.append(permission.Equality(self_channel.hold_constant.permission, other_channel.hold_constant.permission))
                     if isinstance(result, MatchingFailure):
-                        return result, None
+                        return result
 
         assert isinstance(result, MatchingSuccess)
 
@@ -564,10 +576,10 @@ class Configuration:
         return MatchingSuccess(result.substitution, smt.Implies(
             smt.And(*other.path_conditions),
             smt.And(result.condition, *substituted_path_conditions),
-        )), tuple(permission_equalities)
+        ))
 
     @staticmethod
-    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None):
+    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, Union[smt.SMTTerm, AnnotatedSMTTerm]], solver: Optional[smt.Solver] = None):
         initial_permissions: List[permission.PermissionVariable] = []
         hold_permissions: List[permission.PermissionVariable] = []
 
@@ -589,13 +601,16 @@ class Configuration:
         for channel in config.graph.channels:
             if channel.constant is not None:
                 if isinstance(channel.constant, ConstantValue):
-                    value = config.get_fresh_permissioned_value(smt.BVConst(channel.constant.value, WORD_WIDTH), f"const-{channel.id}-")
+                    value = config.get_fresh_permissioned_value(AnnotatedSMTTerm(smt.BVConst(channel.constant.value, WORD_WIDTH)))
 
                 else:
                     assert isinstance(channel.constant, FunctionArgument)
                     name = channel.constant.variable_name
                     assert name in config.free_vars, f"unable to find an assignment to free var {name}"
-                    value = config.get_fresh_permissioned_value(config.free_vars[name], f"const-{channel.id}-")
+                    annotated = config.free_vars[name]
+                    if not isinstance(config.free_vars[name], AnnotatedSMTTerm):
+                        annotated = AnnotatedSMTTerm(annotated)
+                    value = config.get_fresh_permissioned_value(annotated)
 
                 initial_permissions.append(value.permission)
 
@@ -637,6 +652,7 @@ class Configuration:
             self.memory,
             list(self.path_conditions),
             list(self.permission_constraints),
+            self.permission_var_count,
             self.solver,
         )
 
@@ -647,11 +663,13 @@ class Configuration:
     def read_memory(self, base: smt.SMTTerm, index: smt.SMTTerm) -> smt.SMTTerm:
         return smt.Select(self.memory, smt.BVAdd(base, index))
 
-    def get_fresh_permission_var(self, prefix: str) -> permission.PermissionVariable:
-        return permission.GlobalPermissionVarCounter.get_fresh_permission_var(prefix)
+    def get_fresh_permission_var(self, prefix="p") -> permission.PermissionVariable:
+        var = permission.PermissionVariable(f"{prefix}{self.permission_var_count}")
+        self.permission_var_count += 1
+        return var
 
-    def get_fresh_permissioned_value(self, value: smt.SMTTerm, prefix: str) -> PermissionedValue:
-        return PermissionedValue(value, self.get_fresh_permission_var(prefix))
+    def get_fresh_permissioned_value(self, value: AnnotatedSMTTerm) -> PermissionedValue:
+        return PermissionedValue(value, self.get_fresh_permission_var())
 
     def check_feasibility(self) -> bool:
         return smt.check_sat(self.path_conditions, self.solver)
@@ -772,34 +790,6 @@ class Configuration:
 
         return True
 
-    def find_function_argument_producers(self, channel_id: int) -> Tuple[str, ...]:
-        """
-        Find the constant producer of the channel modulo +, gep, inv, steer, carry, merge, select
-        """
-        channel = self.graph.channels[channel_id]
-
-        if channel.constant:
-            if isinstance(channel.constant, FunctionArgument):
-                return channel.constant.variable_name,
-            else:
-                return ()
-
-        assert channel.source is not None
-        source_pe = self.graph.vertices[channel.source]
-
-        if source_pe.operator in { "CF_CFG_OP_STEER", "CF_CFG_OP_INVARIANT", "CF_CFG_OP_CARRY" }:
-            return self.find_function_argument_producers(source_pe.inputs[1].id)
-
-        elif source_pe.operator in { "CF_CFG_OP_SELECT", "CF_CFG_OP_MERGE" }:
-            return self.find_function_argument_producers(source_pe.inputs[1].id) + \
-                   self.find_function_argument_producers(source_pe.inputs[2].id)
-
-        elif source_pe.operator in { "ARITH_CFG_OP_ADD", "ARITH_CFG_OP_GEP" }:
-            return self.find_function_argument_producers(source_pe.inputs[0].id) + \
-                   self.find_function_argument_producers(source_pe.inputs[1].id)
-
-        return ()
-
     def step(self, pe_id: int) -> Tuple[StepResult, ...]:
         """
         Execute the `pe_index`th PE in the dataflow graph for at most one transition
@@ -819,7 +809,7 @@ class Configuration:
 
         # Pop values from the input channels
         input_permissions: List[permission.PermissionVariable] = [operator_state.internal_permission]
-        input_values = []
+        input_values: Union[List[AnnotatedSMTTerm], List[smt.SMTTerm]] = []
         for channel_id in input_channel_ids:
             value = self.channel_states[channel_id].pop()
             input_permissions.append(value.permission)
@@ -827,7 +817,10 @@ class Configuration:
 
         # Run the transition
         # print(f"original transition {operator_state.current_transition}")
-        output_values = transition(operator_state, self, *input_values)
+        if not operator_state.use_annotated_value():
+            input_values = [ value.term for value in input_values ]
+
+        output_values: Union[List[AnnotatedSMTTerm], List[smt.SMTTerm]] = transition(operator_state, self, *input_values)
         # print(f"final transition {operator_state.current_transition} {self.get_transition_input_channels(pe_info, operator_state.current_transition)}")
 
         # Process output behaviors
@@ -844,23 +837,21 @@ class Configuration:
         # If the operation is a store or load
         # Add additional permission constraint of read/write A <= input permissions
         if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
-            base_pointers = self.find_function_argument_producers(pe_info.inputs[0].id)
+            if isinstance(pe_info.inputs[0].constant, FunctionArgument):
 
-            if len(base_pointers) != 0:
+                # TODO: right now we assume that the base is always one of the free variables
+                assert isinstance(pe_info.inputs[0].constant, FunctionArgument)
+                var_name = pe_info.inputs[0].constant.variable_name
+                assert var_name in self.free_vars
+
                 if isinstance(operator_state, LoadOperator):
-                    mem_permission = permission.DisjointUnion.of(*(
-                        permission.ReadPermission(base_pointer)
-                        for base_pointer in base_pointers
-                    ))
+                    mem_permission = permission.ReadPermission(var_name)
                 else:
-                    mem_permission = permission.DisjointUnion.of(*(
-                        permission.WritePermission(base_pointer)
-                        for base_pointer in base_pointers
-                    ))
+                    mem_permission = permission.WritePermission(var_name)
 
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:
-                assert False, "unsupported permission for store/load"
+                print("FIXME: unsupported permission for store/load")
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"internal-{pe_info.id}-")
@@ -898,6 +889,10 @@ class Configuration:
 
             return NextConfiguration(configuration_true), NextConfiguration(configuration_false)
         else:
+            # Convert to annotated version if the operator does not use annotated value explicitly
+            if not operator_state.use_annotated_value():
+                output_values = tuple(AnnotatedSMTTerm(value) for value in output_values)
+
             # Output channels
             for value, action in zip(output_values, output_actions):
                 assert isinstance(action, ChannelId), f"unexpected action {action}"
@@ -906,7 +901,7 @@ class Configuration:
 
                 channels = pe_info.outputs[action.id]
                 for channel in channels:
-                    permissioned_value = self.get_fresh_permissioned_value(value.simplify(), f"channel-{channel.id}-")
+                    permissioned_value = self.get_fresh_permissioned_value(value.simplify())
                     self.channel_states[channel.id].push(permissioned_value)
                     output_permissions.append(permissioned_value.permission)
 

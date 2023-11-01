@@ -149,7 +149,16 @@ class ASTTransformer(Transformer[ASTNode]):
         return tuple(args)
 
     def parameter(self, args: List[Any]) -> List[FunctionParameter]:
-        return FunctionParameter(args[0], args[2].value)
+        return FunctionParameter(args[0], args[2].value, args[1])
+
+    def parameter_attributes(self, args: List[Any]) -> Tuple[str, ...]:
+        return tuple(arg for arg in args if arg is not None)
+
+    def parameter_attribute_ignore(self, args: List[Any]) -> None:
+        return None
+
+    def parameter_attribute_noalias(self, args: List[Any]) -> str:
+        return "noalias"
 
     def type(self, args: List[Type]) -> Type:
         return args[0]
@@ -321,13 +330,13 @@ class Parser:
 
         parameter_attributes: parameter_attribute*
 
-        parameter_attribute: "zeroext"
-                           | "signext"
-                           | "inreg"
-                           | "noalias"
-                           | "nocapture"
-                           | "readonly"
-                           | "readnone"
+        parameter_attribute: "zeroext" -> parameter_attribute_ignore
+                           | "signext" -> parameter_attribute_ignore
+                           | "inreg" -> parameter_attribute_ignore
+                           | "noalias" -> parameter_attribute_noalias
+                           | "nocapture" -> parameter_attribute_ignore
+                           | "readonly" -> parameter_attribute_ignore
+                           | "readnone" -> parameter_attribute_ignore
 
         metadata: "source_filename" "=" STRING
                 | "target" "datalayout" "=" STRING

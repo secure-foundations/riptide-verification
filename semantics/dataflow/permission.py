@@ -13,6 +13,9 @@ class Term:
     def get_free_variables(self) -> Set[PermissionVariable]:
         raise NotImplementedError()
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        raise NotImplementedError()
+
 
 @dataclass
 class EmptyPermission(Term):
@@ -21,6 +24,9 @@ class EmptyPermission(Term):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
+
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        return self
 
 
 @dataclass
@@ -33,6 +39,11 @@ class ReadPermission(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        if self.heap_object in substitution:
+            return ReadPermission(substitution[self.heap_object])
+        return self
+
 
 @dataclass
 class WritePermission(Term):
@@ -44,6 +55,11 @@ class WritePermission(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        if self.heap_object in substitution:
+            return WritePermission(substitution[self.heap_object])
+        return self
+
 
 @dataclass(frozen=True)
 class PermissionVariable(Term):
@@ -53,10 +69,13 @@ class PermissionVariable(Term):
     name: str
 
     def __str__(self):
-        return f"p{self.name}"
+        return f"p({self.name})"
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return {self}
+
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        return self
 
 
 @dataclass
@@ -65,7 +84,7 @@ class DisjointUnion(Term):
 
     def __str__(self):
         return " + ".join(map(str, self.terms))
-    
+
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set().union(*(term.get_free_variables() for term in self.terms))
 
@@ -78,9 +97,15 @@ class DisjointUnion(Term):
 
         return DisjointUnion(terms)
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+        return DisjointUnion.of(*(term.substitute_heap_object(substitution) for term in self.terms))
+
 
 class Formula:
     def get_free_variables(self) -> Set[PermissionVariable]:
+        raise NotImplementedError()
+
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
         raise NotImplementedError()
 
 
@@ -94,6 +119,9 @@ class Equality(Formula):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
+
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+        return Equality(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
 
 @dataclass
@@ -110,6 +138,9 @@ class Inclusion(Formula):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+        return Inclusion(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
+
 
 @dataclass
 class Disjoint(Formula):
@@ -124,11 +155,14 @@ class Disjoint(Formula):
     def __str__(self):
         return f"disjoint({', '.join(map(str, self.terms))})"
 
+    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+        return Disjoint(tuple(term.substitute_heap_object(substitution) for term in self.terms))
+
 
 class RWPermissionPCM:
     """
     A concrete description of the permission PCM in SMT
-    
+
     ## Permission PCM
     Given a set H of disjoint heap object names, the permission partial commutative monoid P(H)
     consists of the following elements:
@@ -178,7 +212,7 @@ class RWPermissionPCM:
 
                 if write_obj:
                     subterms.append(WritePermission(obj))
-            
+
             return DisjointUnion.of(*subterms)
 
         @staticmethod
@@ -190,6 +224,7 @@ class RWPermissionPCM:
 
         @staticmethod
         def get_read_atom(heap_objects: Tuple[str, ...], target_obj: str) -> RWPermissionPCM.Element:
+            assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
             return RWPermissionPCM.Element(heap_objects, {
                 obj: (smt.TRUE(), smt.FALSE()) if obj == target_obj else (smt.FALSE(), smt.FALSE())
                 for obj in heap_objects
@@ -197,6 +232,7 @@ class RWPermissionPCM:
 
         @staticmethod
         def get_write_atom(heap_objects: Tuple[str, ...], target_obj: str) -> RWPermissionPCM.Element:
+            assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
             return RWPermissionPCM.Element(heap_objects, {
                 obj: (smt.FALSE(), smt.TRUE()) if obj == target_obj else (smt.FALSE(), smt.FALSE())
                 for obj in heap_objects
@@ -378,3 +414,13 @@ class MemoryPermissionSolver:
 
             else:
                 return None
+
+
+class GlobalPermissionVarCounter:
+    counter: int = 0
+
+    @staticmethod
+    def get_fresh_permission_var(prefix: str = "p") -> PermissionVariable:
+        var = PermissionVariable(f"{prefix}{GlobalPermissionVarCounter.counter}")
+        GlobalPermissionVarCounter.counter += 1
+        return var

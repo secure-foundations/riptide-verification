@@ -169,6 +169,7 @@ def main():
     sim_checker.generate_dataflow_cut_points()
     sim_checker.check_dataflow_matches()
     sim_checker.check_bisimulation()
+    sim_checker.check_confluence()
 
 
 if __name__ == "__main__":

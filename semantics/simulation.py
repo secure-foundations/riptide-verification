@@ -35,6 +35,7 @@ class DataflowBranch:
     config: dataflow.Configuration
     match_result: Optional[MatchingSuccess] # None for final configuration
     llvm_branch: LLVMBranch # corresponding llvm branch
+    permission_equalities: Optional[Tuple[dataflow.Formula, ...]] # None for final configuration
 
 
 @dataclass
@@ -171,6 +172,11 @@ class SimulationChecker:
 
             self.llvm_cut_points.append(llvm_cut_point)
             self.correspondence.append(None)
+
+        self.permission_var_counter = 0
+
+    def get_fresh_permission_var(self, prefix: str) -> dataflow.PermissionVariable:
+        return dataflow.GlobalPermissionVarCounter.get_fresh_permission_var(prefix)
 
     def debug_common(self, *args, **kwargs):
         if self.debug:
@@ -331,7 +337,7 @@ class SimulationChecker:
 
             # Base case: exactly one llvm branch
             if len(llvm_branches) == 1 and trace_counter >= len(llvm_branches[0].trace):
-                return DataflowBranch(config, None, llvm_branches[0]),
+                return DataflowBranch(config, None, llvm_branches[0], None),
 
             possible_llvm_positions = set(branch.trace[trace_counter] for branch in llvm_branches)
             assert len(possible_llvm_positions) == 1, \
@@ -392,6 +398,50 @@ class SimulationChecker:
 
         return None
 
+    def check_confluence(self):
+        """
+        Check the satifiability of the conjunction of all memory permission constraints
+        """
+
+        constraints: List[dataflow.Formula] = []
+
+        for j in range(self.num_cut_points):
+            for i in range(self.num_cut_points):
+                for dataflow_branch in self.matched_dataflow_branches[i][j]:
+                    constraints.extend(dataflow_branch.config.permission_constraints)
+                    constraints.extend(dataflow_branch.permission_equalities)
+
+        for i in range(self.num_cut_points):
+            for dataflow_branch in self.final_dataflow_branches[i]:
+                constraints.extend(dataflow_branch.config.permission_constraints)
+
+        # for constraint in constraints:
+        #     print("  -", constraint)
+        # print(len(constraints))
+
+        # Find all heap objects, and coalesce ones that could alias
+        heap_object = [ "other_mem" ]
+        heap_object_substitution = {}
+        for parameter in self.llvm_function.parameters.values():
+            if parameter.is_noalias():
+                heap_object.append(parameter.name)
+                heap_object_substitution[parameter.name[1:]] = parameter.name
+            else:
+                # Could alias with each other, so we gather them all into other_mem
+                heap_object_substitution[parameter.name[1:]] = "other_mem"
+
+        for i, constraint in enumerate(constraints):
+            constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
+
+        self.debug_common(f"heap objects: {heap_object}")
+        self.debug_common(f"checking sat of {len(constraints)} memory permission constraints")
+
+        solution = dataflow.MemoryPermissionSolver.solve_constraints(tuple(heap_object), constraints)
+        if solution is None:
+            self.debug_common("unsat - may not be confluent")
+        else:
+            self.debug_common("sat - confluent")
+
     def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):
         llvm_branch = dataflow_branch.llvm_branch
         self.debug_common(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")
@@ -439,6 +489,8 @@ class SimulationChecker:
         """
         Check if the branches in self.matched_dataflow_branches actually match
         their corresponding cut points. If so set branch.match_result
+
+        Returns a list of permission equalities that are required for the matchings to work
         """
 
         for i in range(self.num_cut_points):
@@ -447,11 +499,12 @@ class SimulationChecker:
             for j in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
                     self.debug_dataflow(f"checking a matched branch from cut point {j} to {i}")
-                    match_result = target_dataflow_cut_point.match(dataflow_branch.config)
+                    match_result, permission_equalities = target_dataflow_cut_point.match(dataflow_branch.config)
                     assert isinstance(match_result, MatchingSuccess), \
                            f"failed to match an expected dataflow branch from cut point {j} to {i}: {match_result.reason}"
                     assert match_result.check_condition(), "unexpected matching failure"
                     dataflow_branch.match_result = match_result
+                    dataflow_branch.permission_equalities = permission_equalities
 
     def generate_dataflow_cut_points(self):
         while True:
@@ -494,6 +547,9 @@ class SimulationChecker:
         dataflow_branches = self.run_dataflow_with_llvm_branches(dataflow_cut_point.copy(), llvm_branches, correspondence)
 
         for dataflow_branch in dataflow_branches:
+            # for constraint in dataflow_branch.config.permission_constraints:
+            #     print("  -", constraint)
+
             target_cut_point = dataflow_branch.llvm_branch.to_cut_point
             if target_cut_point is not None:
                 self.matched_dataflow_branches[target_cut_point][cut_point_index].append(dataflow_branch)
@@ -501,7 +557,7 @@ class SimulationChecker:
                 # Infer the target dataflow cut point
                 if self.dataflow_cut_points[target_cut_point] is None:
                     self.debug_dataflow(f"inferring dataflow cut point {target_cut_point} using a dataflow trace from cut point {cut_point_index}")
-                    target_dataflow_cut_point, target_correspondence = self.generalize_dataflow_branch_to_cut_point(dataflow_branch)
+                    target_dataflow_cut_point, target_correspondence = self.generalize_dataflow_branch_to_cut_point(target_cut_point, dataflow_branch)
                     self.debug_dataflow(f"inferred dataflow cut point {target_cut_point}\n{target_dataflow_cut_point}")
                     self.debug_dataflow(f"inferred correspondence at cut point {target_cut_point}\n{target_correspondence}")
 
@@ -514,16 +570,14 @@ class SimulationChecker:
             else:
                 self.final_dataflow_branches[cut_point_index].append(dataflow_branch)
 
-    def generalize_dataflow_branch_to_cut_point(self, branch: DataflowBranch) -> Tuple[dataflow.Configuration, Correspondence]:
+    def generalize_dataflow_branch_to_cut_point(self, target_cut_point_index: int, branch: DataflowBranch) -> Tuple[dataflow.Configuration, Correspondence]:
         """
         Generalize a dataflow config to a cut point.
 
         Returns the generalized template and a correspondence
         """
-        cut_point = self.dataflow_cut_points[0].copy()
-
-        # TODO
-        dummy_permission = dataflow.PermissionVariable("dummy")
+        # not copying self.dataflow_cut_points[0] since we want fresh permission variables
+        cut_point = dataflow.Configuration.get_initial_configuration(self.dataflow_graph, self.dataflow_params, self.solver)
 
         # Mapping from llvm var name |-> generalized dataflow variables corresponding to it
         llvm_var_correspondence: OrderedDict[str, List[smt.SMTTerm]] = OrderedDict()
@@ -574,18 +628,7 @@ class SimulationChecker:
 
             # If the destination is a carry, we need to simplify the decider condition to a constant
             if dest_pe.operator == "CF_CFG_OP_CARRY" and channel.destination_port == 0:
-                # TODO: check if the channel value is always true under path condition
-                # print(config.path_conditions)
-                decider_term = branch.config.channel_states[channel_id].peek().term
-
-                if smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(1, dataflow.WORD_WIDTH)),), self.solver):
-                    decider_value = smt.BVConst(1, dataflow.WORD_WIDTH)
-                elif smt.check_implication(branch.config.path_conditions, (smt.Equals(decider_term, smt.BVConst(0, dataflow.WORD_WIDTH)),), self.solver):
-                    decider_value = smt.BVConst(0, dataflow.WORD_WIDTH)
-                else:
-                    assert False, f"cannot determine a constant decider value {decider_term} from path conditions {branch.config.path_conditions}"
-
-                cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(decider_value, dummy_permission))
+                assert False, f"carry operator {dest_pe.id} should be fired"
 
             else:
                 # Generalize the value in the channel and assign an LLVM correspondence
@@ -594,7 +637,7 @@ class SimulationChecker:
                 if producer_llvm_var is not None:
                     sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
                     fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
-                    cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, dummy_permission))
+                    cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-channel-{channel_id}-")))
 
                     assert llvm_cut_point.has_variable(producer_llvm_var), \
                            f"corresponding llvm var {producer_llvm_var} of channel {channel_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
@@ -606,7 +649,7 @@ class SimulationChecker:
                         # An unused constant value
                         cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(
                             branch.config.channel_states[channel_id].peek().term,
-                            dummy_permission,
+                            self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-const-{channel_id}-"),
                         ))
                     else:
                         assert False, f"cannot find an llvm variable corresponding to a value in channel {channel.id}"

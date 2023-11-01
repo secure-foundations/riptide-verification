@@ -83,7 +83,7 @@ class FunctionType(Type):
 class Value(ASTNode):
     def get_type(self) -> Type:
         raise NotImplementedError()
-    
+
     def resolve_uses(self, function: Function) -> Value:
         return self
 
@@ -92,9 +92,13 @@ class Value(ASTNode):
 class FunctionParameter(Value):
     type: Type
     name: str
+    attributes: Tuple[str, ...]
 
     def get_type(self) -> Type:
         return self.type
+
+    def is_noalias(self) -> bool:
+        return "noalias" in self.attributes
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
@@ -156,7 +160,7 @@ class BasicBlock(ASTNode):
 class UnresolvedValue(Value):
     def attach_type(self, typ: Type) -> Value:
         raise NotImplementedError()
-    
+
     def resolve_uses(self, function: Function) -> Value:
         raise NotImplementedError()
 
@@ -173,7 +177,7 @@ class UnresolvedNullValue(UnresolvedValue):
     def attach_type(self, typ: Type) -> NullConstant:
         assert isinstance(typ, PointerType)
         return NullConstant(typ.base_type)
-    
+
 
 class UnresolvedUndefValue(UnresolvedValue):
     def attach_type(self, typ: Type) -> UndefConstant:
@@ -188,7 +192,7 @@ class UnresolvedVariable(UnresolvedValue):
 
     def attach_type(self, typ: Type) -> UnresolvedVariable:
         return UnresolvedVariable(self.name, typ)
-    
+
     def resolve_uses(self, function: Function) -> Value:
         if self.name in function.parameters:
             return function.parameters[self.name]
@@ -239,7 +243,7 @@ class UndefConstant(Constant):
 class Instruction(Value):
     def get_defined_variable(self) -> Optional[str]:
         return None
-    
+
     def resolve_uses(self, function: Function) -> None:
         ...
 
@@ -272,7 +276,7 @@ class AddInstruction(Instruction):
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
-    
+
 
 @dataclass
 class MulInstruction(Instruction):
@@ -474,7 +478,7 @@ class SextInstruction(Instruction):
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         self.value = self.value.resolve_uses(function)
 
@@ -498,7 +502,7 @@ class IntegerCompareInstruction(Instruction):
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         self.left = self.left.resolve_uses(function)
         self.right = self.right.resolve_uses(function)
@@ -520,10 +524,10 @@ class SelectInstruction(Instruction):
     type: Type
     left: Value
     right: Value
-    
+
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         self.cond = self.cond.resolve_uses(function)
         self.left = self.left.resolve_uses(function)
@@ -548,7 +552,7 @@ class GetElementPointerInstruction(Instruction):
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         self.pointer = self.pointer.resolve_uses(function)
         self.indices = tuple(index.resolve_uses(function) for index in self.indices)
@@ -573,7 +577,7 @@ class LoadInstruction(Instruction):
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         self.pointer = self.pointer.resolve_uses(function)
 
@@ -630,7 +634,7 @@ class PhiInstruction(Instruction):
 
     def get_defined_variable(self) -> Optional[str]:
         return self.name
-    
+
     def resolve_uses(self, function: Function) -> None:
         for branch in self.branches.values():
             branch.resolve_uses(function)

@@ -405,15 +405,69 @@ class SimulationChecker:
 
         constraints: List[dataflow.Formula] = []
 
+        # cut point index |-> expansion size
+        expansion_size: List[int] = []
+
+        for i in range(self.num_cut_points):
+            expansion_size.append(max(1, max(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
+
+        self.debug_common(f"using expansion sizes {expansion_size}")
+
         for j in range(self.num_cut_points):
             for i in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
-                    constraints.extend(dataflow_branch.config.permission_constraints)
-                    constraints.extend(dataflow_branch.permission_equalities)
+                    permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+                    equality_constraint = dataflow.Conjunction(tuple(dataflow_branch.permission_equalities))
+
+                    for source_expansion_index in range(expansion_size[j]):
+                        substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
+
+                        for free_var in permission_constraint.get_free_variables():
+                            if free_var.name.startswith(f"cut-point-{j}"):
+                                # need consistent renaming here
+                                substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
+                            else:
+                                # refresh other variables
+                                assert not free_var.name.startswith("cut-point-"), f"unexpected free var {free_var.name} from cut point {j} to {i}"
+                                prefix = "-".join(free_var.name.split("-")[:-1])
+                                substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+                        substituted_permission_constraint = permission_constraint.substitute(substitution)
+                        substituted_equality_constraint = equality_constraint.substitute(substitution)
+
+                        # state that the equality should only need to work for one of the expanded cut point
+                        disjuncts = []
+                        for target_expansion_index in range(expansion_size[i]):
+                            substitution = {}
+                            for free_var in self.dataflow_cut_points[i].get_free_permission_vars():
+                                assert free_var.name.startswith(f"cut-point-{i}")
+                                substitution[free_var] = dataflow.PermissionVariable(f"expansion-{target_expansion_index}-" + free_var.name)
+                            disjuncts.append(substituted_equality_constraint.substitute(substitution))
+
+                        substituted_equality_constraint = dataflow.Disjunction(tuple(disjuncts))
+
+                        constraints.append(substituted_permission_constraint)
+                        constraints.append(substituted_equality_constraint)
 
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
-                constraints.extend(dataflow_branch.config.permission_constraints)
+                permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+
+                for source_expansion_index in range(expansion_size[i]):
+                    substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
+
+                    for free_var in permission_constraint.get_free_variables():
+                        if free_var.name.startswith(f"cut-point-{i}"):
+                            # need consistent renaming here
+                            substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
+                        else:
+                            # refresh other variables
+                            assert not free_var.name.startswith("cut-point-")
+                            prefix = "-".join(free_var.name.split("-")[:-1])
+                            substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+                    substituted_permission_constraint = permission_constraint.substitute(substitution)
+                    constraints.append(substituted_permission_constraint)
 
         # for constraint in constraints:
         #     print("  -", constraint)
@@ -602,6 +656,9 @@ class SimulationChecker:
                     # TODO: check if the generalized config matches anyway?
                     ...
             else:
+                if cut_point_index == 0:
+                    print(dataflow_cut_point.get_free_permission_vars())
+                    print(dataflow_branch.config.get_free_permission_vars())
                 self.final_dataflow_branches[cut_point_index].append(dataflow_branch)
 
     def generalize_dataflow_branch_to_cut_point(self, target_cut_point_index: int, branch: DataflowBranch) -> Tuple[dataflow.Configuration, Correspondence]:
@@ -627,7 +684,7 @@ class SimulationChecker:
 
             # Refresh the internal permission variable
             operator.internal_permission = self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-internal-{pe_id}-")
-            initial_permissions.append(operator.internal_permission)
+            initial_permissions.append(cut_point.operator_states[pe_id].internal_permission)
 
             if isinstance(operator, dataflow.InvariantOperator) and \
                operator.current_transition == dataflow.InvariantOperator.loop:
@@ -650,7 +707,8 @@ class SimulationChecker:
         # Generalize the channel states
         for channel_id, channel_state in enumerate(branch.config.channel_states):
             if channel_state.hold_constant is not None:
-                hold_permissions.append(channel_state.hold_constant.permission)
+                initial_permissions.append(cut_point.channel_states[channel_id].hold_constant.permission)
+                hold_permissions.append(cut_point.channel_states[channel_id].hold_constant.permission)
                 continue
 
             if channel_state.count() == 0:

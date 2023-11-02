@@ -13,6 +13,9 @@ class Term:
     def get_free_variables(self) -> Set[PermissionVariable]:
         raise NotImplementedError()
 
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        raise NotImplementedError()
+
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         raise NotImplementedError()
 
@@ -24,6 +27,9 @@ class EmptyPermission(Term):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return self
@@ -38,6 +44,9 @@ class ReadPermission(Term):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
@@ -57,6 +66,9 @@ class WritePermission(Term):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
@@ -80,6 +92,11 @@ class PermissionVariable(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return {self}
 
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        if self in substitution:
+            return substitution[self]
+        return self
+
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return self
 
@@ -91,9 +108,6 @@ class DisjointUnion(Term):
     def __str__(self):
         return " + ".join(map(str, self.terms))
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
-        return set().union(*(term.get_free_variables() for term in self.terms))
-
     @staticmethod
     def of(*terms: Term) -> DisjointUnion:
         terms = tuple(terms)
@@ -103,12 +117,21 @@ class DisjointUnion(Term):
 
         return DisjointUnion(terms)
 
+    def get_free_variables(self) -> Set[PermissionVariable]:
+        return set().union(*(term.get_free_variables() for term in self.terms))
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return DisjointUnion.of(*(term.substitute(substitution) for term in self.terms))
+
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return DisjointUnion.of(*(term.substitute_heap_object(substitution) for term in self.terms))
 
 
 class Formula:
     def get_free_variables(self) -> Set[PermissionVariable]:
+        raise NotImplementedError()
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Formula:
         raise NotImplementedError()
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -125,6 +148,9 @@ class Equality(Formula):
 
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return Equality(self.left.substitute(substitution), self.right.substitute(substitution))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Equality(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
@@ -144,6 +170,9 @@ class Inclusion(Formula):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return Inclusion(self.left.substitute(substitution), self.right.substitute(substitution))
+
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Inclusion(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
@@ -155,14 +184,51 @@ class Disjoint(Formula):
     """
     terms: Tuple[Term, ...]
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
-        return set().union(*(term.get_free_variables() for term in self.terms))
-
     def __str__(self):
         return f"disjoint({', '.join(map(str, self.terms))})"
 
+    def get_free_variables(self) -> Set[PermissionVariable]:
+        return set().union(*(term.get_free_variables() for term in self.terms))
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return Disjoint(tuple(term.substitute(substitution) for term in self.terms))
+
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Disjoint(tuple(term.substitute_heap_object(substitution) for term in self.terms))
+
+
+@dataclass
+class Conjunction(Formula):
+    formulas: Tuple[Formula, ...]
+
+    def __str__(self):
+        return {" /\\ ".join(map(str, self.terms))}
+
+    def get_free_variables(self) -> Set[PermissionVariable]:
+        return set().union(*(formula.get_free_variables() for formula in self.formulas))
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return Conjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
+
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
+        return Conjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
+
+
+@dataclass
+class Disjunction(Formula):
+    formulas: Tuple[Formula, ...]
+
+    def __str__(self):
+        return {" \\/ ".join(map(str, self.terms))}
+
+    def get_free_variables(self) -> Set[PermissionVariable]:
+        return set().union(*(formula.get_free_variables() for formula in self.formulas))
+
+    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+        return Disjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
+
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
+        return Disjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
 
 
 class RWPermissionPCM:
@@ -309,7 +375,7 @@ class RWPermissionPCM:
 
         assert False, f"unsupported term {term}"
 
-    def interpret_formula(self, assignment: Mapping[PermissionVariable, RWPermissionPCM.Element], formula: Formula) -> Tuple[smt.SMTTerm, smt.SMTTerm]:
+    def interpret_formula(self, assignment: Mapping[PermissionVariable, RWPermissionPCM.Element], formula: Formula) -> smt.SMTTerm:
         """
         Interpret a formula in the PCM, returning (truth, condition to be well-defined)
         """
@@ -325,7 +391,7 @@ class RWPermissionPCM:
                 for obj in self.heap_objects
             )
             defined = smt.And(left_defined, right_defined)
-            return interp, defined
+            return smt.And(interp, defined)
 
         if isinstance(formula, Inclusion):
             left_interp, left_defined = self.interpret_term(assignment, formula.left)
@@ -339,7 +405,7 @@ class RWPermissionPCM:
                 for obj in self.heap_objects
             )
             defined = smt.And(left_defined, right_defined)
-            return interp, defined
+            return smt.And(interp, defined)
 
         if isinstance(formula, Disjoint):
             subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in formula.terms)
@@ -357,7 +423,15 @@ class RWPermissionPCM:
                 for obj in self.heap_objects
             )
             defined = smt.And(cond for _, cond in subterm_interps)
-            return interp, defined
+            return smt.And(interp, defined)
+
+        if isinstance(formula, Conjunction):
+            subformula_interps = tuple(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
+            return smt.And(*subformula_interps)
+
+        if isinstance(formula, Disjunction):
+            subformula_interps = tuple(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
+            return smt.Or(*subformula_interps)
 
         assert False, f"unsupported formula {formula}"
 
@@ -432,9 +506,8 @@ class MemoryPermissionSolver:
             solver.add_assertion(assignment_defined)
 
             for constraint in constraints:
-                valid, defined = pcm.interpret_formula(assignment, constraint)
+                valid = pcm.interpret_formula(assignment, constraint)
                 solver.add_assertion(valid)
-                solver.add_assertion(defined)
 
             if solver.solve():
                 model = solver.get_model()

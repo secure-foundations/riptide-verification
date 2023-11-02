@@ -632,6 +632,24 @@ class Configuration:
     def get_fresh_memory_var() -> smt.SMTTerm:
         return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)), "dataflow_mem_%d")
 
+    def get_free_permission_vars(self) -> Tuple[permission.PermissionVariable, ...]:
+        """
+        Get all permission variables in the configuration (not including permission constraints)
+        """
+        permission_vars: List[permission.PermissionVariable] = []
+
+        for operator_state in self.operator_states:
+            permission_vars.append(operator_state.internal_permission)
+
+        for channel_state in self.channel_states:
+            if channel_state.hold_constant is not None:
+                permission_vars.append(channel_state.hold_constant.permission)
+
+            for value in channel_state.values:
+                permission_vars.append(value.permission)
+
+        return tuple(permission_vars)
+
     def copy(self) -> Configuration:
         return Configuration(
             self.graph,

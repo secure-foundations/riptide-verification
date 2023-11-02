@@ -13,7 +13,7 @@ class Term:
     def get_free_variables(self) -> Set[PermissionVariable]:
         raise NotImplementedError()
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         raise NotImplementedError()
 
 
@@ -25,7 +25,7 @@ class EmptyPermission(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return self
 
 
@@ -39,9 +39,12 @@ class ReadPermission(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
-            return ReadPermission(substitution[self.heap_object])
+            if substitution[self.heap_object] is None:
+                return EmptyPermission()
+            else:
+                return ReadPermission(substitution[self.heap_object])
         return self
 
 
@@ -55,9 +58,12 @@ class WritePermission(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return set()
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
-            return WritePermission(substitution[self.heap_object])
+            if substitution[self.heap_object] is None:
+                return EmptyPermission()
+            else:
+                return WritePermission(substitution[self.heap_object])
         return self
 
 
@@ -74,7 +80,7 @@ class PermissionVariable(Term):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return {self}
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return self
 
 
@@ -97,7 +103,7 @@ class DisjointUnion(Term):
 
         return DisjointUnion(terms)
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Term:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return DisjointUnion.of(*(term.substitute_heap_object(substitution) for term in self.terms))
 
 
@@ -105,7 +111,7 @@ class Formula:
     def get_free_variables(self) -> Set[PermissionVariable]:
         raise NotImplementedError()
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         raise NotImplementedError()
 
 
@@ -120,7 +126,7 @@ class Equality(Formula):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Equality(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
 
@@ -138,7 +144,7 @@ class Inclusion(Formula):
     def get_free_variables(self) -> Set[PermissionVariable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Inclusion(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
 
@@ -155,7 +161,7 @@ class Disjoint(Formula):
     def __str__(self):
         return f"disjoint({', '.join(map(str, self.terms))})"
 
-    def substitute_heap_object(self, substitution: Mapping[str, str]) -> Formula:
+    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Disjoint(tuple(term.substitute_heap_object(substitution) for term in self.terms))
 
 
@@ -358,6 +364,35 @@ class RWPermissionPCM:
 
 class MemoryPermissionSolver:
     @staticmethod
+    def find_function_argument_producers(graph: DataflowGraph, channel_id: int) -> Tuple[str, ...]:
+        """
+        Find the constant producer of the channel modulo +, gep, inv, steer, carry, merge, select
+        """
+        channel = graph.channels[channel_id]
+
+        if channel.constant:
+            if isinstance(channel.constant, FunctionArgument):
+                return channel.constant.variable_name,
+            else:
+                return ()
+
+        assert channel.source is not None
+        source_pe = graph.vertices[channel.source]
+
+        if source_pe.operator in { "CF_CFG_OP_STEER", "CF_CFG_OP_INVARIANT", "CF_CFG_OP_CARRY" }:
+            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
+
+        elif source_pe.operator in { "CF_CFG_OP_SELECT", "CF_CFG_OP_MERGE" }:
+            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id) + \
+                   MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[2].id)
+
+        elif source_pe.operator in { "ARITH_CFG_OP_ADD", "ARITH_CFG_OP_GEP" }:
+            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[0].id) + \
+                   MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
+
+        return ()
+
+    @staticmethod
     def get_static_heap_objects(graph: DataflowGraph) -> Tuple[str, ...]:
         """
         Read all static heap objects from a graph
@@ -368,12 +403,10 @@ class MemoryPermissionSolver:
 
         for pe in graph.vertices:
             if pe.operator in ("MEM_CFG_OP_LOAD", "MEM_CFG_OP_STORE"):
-                assert isinstance(pe.inputs[0].constant, FunctionArgument)
-                name = pe.inputs[0].constant.variable_name
-
-                if name not in found:
-                    found.add(name)
-                    heap_objects.append(name)
+                for name in MemoryPermissionSolver.find_function_argument_producers(graph, pe.inputs[0].id):
+                    if name not in found:
+                        found.add(name)
+                        heap_objects.append(name)
 
         return tuple(heap_objects)
 

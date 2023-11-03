@@ -41,9 +41,9 @@ class Operator:
             return cls
         return wrapper
 
-    def __init__(self, pe: ProcessingElement, permission: permission.PermissionVariable, transition: Optional[TransitionFunction] = None):
+    def __init__(self, pe: ProcessingElement, permission: permission.Variable, transition: Optional[TransitionFunction] = None):
         self.pe = pe
-        self.internal_permission: permission.PermissionVariable = permission
+        self.internal_permission: permission.Variable = permission
         self.current_transition: TransitionFunction = transition or type(self).start
 
     def transition_to(self, transition: TransitionFunction):
@@ -377,7 +377,7 @@ class WildcardOperator(Operator):
 @dataclass
 class PermissionedValue:
     term: smt.SMTTerm
-    permission: permission.PermissionVariable
+    permission: permission.Variable
 
     def __str__(self) -> str:
         return str(self.term)
@@ -571,8 +571,8 @@ class Configuration:
 
     @staticmethod
     def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None, permission_prefix: str = ""):
-        initial_permissions: List[permission.PermissionVariable] = []
-        hold_permissions: List[permission.PermissionVariable] = []
+        initial_permissions: List[permission.Variable] = []
+        hold_permissions: List[permission.Variable] = []
 
         config = Configuration(graph, free_vars, solver=solver)
 
@@ -632,11 +632,11 @@ class Configuration:
     def get_fresh_memory_var() -> smt.SMTTerm:
         return smt.FreshSymbol(smt.ArrayType(smt.BVType(WORD_WIDTH), smt.BVType(WORD_WIDTH)), "dataflow_mem_%d")
 
-    def get_free_permission_vars(self) -> Tuple[permission.PermissionVariable, ...]:
+    def get_free_permission_vars(self) -> Tuple[permission.Variable, ...]:
         """
         Get all permission variables in the configuration (not including permission constraints)
         """
-        permission_vars: List[permission.PermissionVariable] = []
+        permission_vars: List[permission.Variable] = []
 
         for operator_state in self.operator_states:
             permission_vars.append(operator_state.internal_permission)
@@ -670,7 +670,7 @@ class Configuration:
     def read_memory(self, base: smt.SMTTerm, index: smt.SMTTerm) -> smt.SMTTerm:
         return smt.Select(self.memory, smt.BVAdd(base, index))
 
-    def get_fresh_permission_var(self, prefix: str) -> permission.PermissionVariable:
+    def get_fresh_permission_var(self, prefix: str) -> permission.Variable:
         return permission.GlobalPermissionVarCounter.get_fresh_permission_var(prefix)
 
     def get_fresh_permissioned_value(self, value: smt.SMTTerm, prefix: str) -> PermissionedValue:
@@ -819,7 +819,7 @@ class Configuration:
         # TODO: when channels are bounded, check for output channel availability here
 
         # Pop values from the input channels
-        input_permissions: List[permission.PermissionVariable] = [operator_state.internal_permission]
+        input_permissions: List[permission.Variable] = [operator_state.internal_permission]
         input_values = []
         for channel_id in input_channel_ids:
             value = self.channel_states[channel_id].pop()
@@ -845,38 +845,19 @@ class Configuration:
         # If the operation is a store or load
         # Add additional permission constraint of read/write A <= input permissions
         if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
-            base_pointers = permission.MemoryPermissionSolver.find_function_argument_producers(self.graph, pe_info.inputs[0].id)
+            base_pointers = permission.PermissionSolver.find_function_argument_producers(self.graph, pe_info.inputs[0].id)
 
             if len(base_pointers) != 0:
                 if isinstance(operator_state, LoadOperator):
                     mem_permission = permission.DisjointUnion.of(*(
-                        permission.ReadPermission(base_pointer)
+                        permission.Read(base_pointer)
                         for base_pointer in base_pointers
                     ))
                 else:
                     mem_permission = permission.DisjointUnion.of(*(
-                        permission.WritePermission(base_pointer)
+                        permission.Write(base_pointer)
                         for base_pointer in base_pointers
                     ))
-
-                # 0, 15, 17, 19, 14, 43, 29, 37
-
-                # 29: queue
-                # 0: queue
-                # 15: rows
-                # 17: rows
-                # 19: cols
-                # 14: visited
-                # 43: visited
-                # 37: walk
-
-                # {0, 19, 14}
-                # if pe_id in {29, 43}:
-                #     self.permission_constraints.append(permission.Inclusion(permission.DisjointUnion.of(*(
-                #         permission.ReadPermission(base_pointer)
-                #         for base_pointer in base_pointers
-                #     )), permission.DisjointUnion(input_permissions)))
-                # else:
 
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
             else:
@@ -884,7 +865,7 @@ class Configuration:
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"exec-internal-{pe_info.id}-")
-        output_permissions: List[permission.PermissionVariable] = [operator_state.internal_permission]
+        output_permissions: List[permission.Variable] = [operator_state.internal_permission]
 
         if len(output_actions) == 1 and output_actions[0] is Branching:
             # A single branching action

@@ -10,10 +10,10 @@ import semantics.smt as smt
 
 
 class Term:
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         raise NotImplementedError()
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         raise NotImplementedError()
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
@@ -21,14 +21,14 @@ class Term:
 
 
 @dataclass
-class EmptyPermission(Term):
+class Empty(Term):
     def __str__(self):
         return "0"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set()
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
@@ -36,51 +36,51 @@ class EmptyPermission(Term):
 
 
 @dataclass
-class ReadPermission(Term):
+class Read(Term):
     heap_object: str
 
     def __str__(self):
         return f"read {self.heap_object}"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set()
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
             if substitution[self.heap_object] is None:
-                return EmptyPermission()
+                return Empty()
             else:
-                return ReadPermission(substitution[self.heap_object])
+                return Read(substitution[self.heap_object])
         return self
 
 
 @dataclass
-class WritePermission(Term):
+class Write(Term):
     heap_object: str
 
     def __str__(self):
         return f"write {self.heap_object}"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set()
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return self
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         if self.heap_object in substitution:
             if substitution[self.heap_object] is None:
-                return EmptyPermission()
+                return Empty()
             else:
-                return WritePermission(substitution[self.heap_object])
+                return Write(substitution[self.heap_object])
         return self
 
 
 @dataclass(frozen=True)
-class PermissionVariable(Term):
+class Variable(Term):
     """
     Permission for a channel
     """
@@ -89,10 +89,10 @@ class PermissionVariable(Term):
     def __str__(self):
         return f"p({self.name})"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return {self}
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         if self in substitution:
             return substitution[self]
         return self
@@ -113,14 +113,14 @@ class DisjointUnion(Term):
         terms = tuple(terms)
 
         if len(terms) == 0:
-            return EmptyPermission()
+            return Empty()
 
         return DisjointUnion(terms)
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set().union(*(term.get_free_variables() for term in self.terms))
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return DisjointUnion.of(*(term.substitute(substitution) for term in self.terms))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
@@ -128,10 +128,10 @@ class DisjointUnion(Term):
 
 
 class Formula:
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         raise NotImplementedError()
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Formula:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Formula:
         raise NotImplementedError()
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -146,10 +146,10 @@ class Equality(Formula):
     def __str__(self):
         return f"{self.left} = {self.right}"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Equality(self.left.substitute(substitution), self.right.substitute(substitution))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -167,10 +167,10 @@ class Inclusion(Formula):
     def __str__(self):
         return f"{self.left} ⊑ {self.right}"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return self.left.get_free_variables().union(self.right.get_free_variables())
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Inclusion(self.left.substitute(substitution), self.right.substitute(substitution))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -187,10 +187,10 @@ class Disjoint(Formula):
     def __str__(self):
         return f"disjoint({', '.join(map(str, self.terms))})"
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set().union(*(term.get_free_variables() for term in self.terms))
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Disjoint(tuple(term.substitute(substitution) for term in self.terms))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -204,10 +204,10 @@ class Conjunction(Formula):
     def __str__(self):
         return {" /\\ ".join(map(str, self.terms))}
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set().union(*(formula.get_free_variables() for formula in self.formulas))
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Conjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -221,10 +221,10 @@ class Disjunction(Formula):
     def __str__(self):
         return {" \\/ ".join(map(str, self.terms))}
 
-    def get_free_variables(self) -> Set[PermissionVariable]:
+    def get_free_variables(self) -> Set[Variable]:
         return set().union(*(formula.get_free_variables() for formula in self.formulas))
 
-    def substitute(self, substitution: Mapping[PermissionVariable, Term]) -> Term:
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Disjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
@@ -280,10 +280,10 @@ class RWPermissionPCM:
                 assert not (read_obj and write_obj), "a valid permission should not have both read and write to a heap object"
 
                 if read_obj:
-                    subterms.append(ReadPermission(obj))
+                    subterms.append(Read(obj))
 
                 if write_obj:
-                    subterms.append(WritePermission(obj))
+                    subterms.append(Write(obj))
 
             return DisjointUnion.of(*subterms)
 
@@ -327,21 +327,21 @@ class RWPermissionPCM:
     def __init__(self, heap_objects: Tuple[str, ...]):
         self.heap_objects = heap_objects
 
-    def interpret_term(self, assignment: Mapping[PermissionVariable, RWPermissionPCM.Element], term: Term) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
+    def interpret_term(self, assignment: Mapping[Variable, RWPermissionPCM.Element], term: Term) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
         """
         Interprete a term in the PCM, returning (permission element, condition to be well-defined)
         """
 
-        if isinstance(term, EmptyPermission):
+        if isinstance(term, Empty):
             return RWPermissionPCM.Element.get_zero(self.heap_objects), smt.TRUE()
 
-        if isinstance(term, ReadPermission):
+        if isinstance(term, Read):
             return RWPermissionPCM.Element.get_read_atom(self.heap_objects, term.heap_object), smt.TRUE()
 
-        if isinstance(term, WritePermission):
+        if isinstance(term, Write):
             return RWPermissionPCM.Element.get_write_atom(self.heap_objects, term.heap_object), smt.TRUE()
 
-        if isinstance(term, PermissionVariable):
+        if isinstance(term, Variable):
             assert term in assignment, f"unable ot find variable {term} in the given assignment"
             return assignment[term], smt.TRUE()
 
@@ -375,7 +375,7 @@ class RWPermissionPCM:
 
         assert False, f"unsupported term {term}"
 
-    def interpret_formula(self, assignment: Mapping[PermissionVariable, RWPermissionPCM.Element], formula: Formula) -> smt.SMTTerm:
+    def interpret_formula(self, assignment: Mapping[Variable, RWPermissionPCM.Element], formula: Formula) -> smt.SMTTerm:
         """
         Interpret a formula in the PCM, returning (truth, condition to be well-defined)
         """
@@ -436,7 +436,7 @@ class RWPermissionPCM:
         assert False, f"unsupported formula {formula}"
 
 
-class MemoryPermissionSolver:
+class PermissionSolver:
     @staticmethod
     def find_function_argument_producers(graph: DataflowGraph, channel_id: int) -> Tuple[str, ...]:
         """
@@ -454,15 +454,15 @@ class MemoryPermissionSolver:
         source_pe = graph.vertices[channel.source]
 
         if source_pe.operator in { "CF_CFG_OP_STEER", "CF_CFG_OP_INVARIANT", "CF_CFG_OP_CARRY" }:
-            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
+            return PermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
 
         elif source_pe.operator in { "CF_CFG_OP_SELECT", "CF_CFG_OP_MERGE" }:
-            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id) + \
-                   MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[2].id)
+            return PermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id) + \
+                   PermissionSolver.find_function_argument_producers(graph, source_pe.inputs[2].id)
 
         elif source_pe.operator in { "ARITH_CFG_OP_ADD", "ARITH_CFG_OP_GEP" }:
-            return MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[0].id) + \
-                   MemoryPermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
+            return PermissionSolver.find_function_argument_producers(graph, source_pe.inputs[0].id) + \
+                   PermissionSolver.find_function_argument_producers(graph, source_pe.inputs[1].id)
 
         return ()
 
@@ -477,7 +477,7 @@ class MemoryPermissionSolver:
 
         for pe in graph.vertices:
             if pe.operator in ("MEM_CFG_OP_LOAD", "MEM_CFG_OP_STORE"):
-                for name in MemoryPermissionSolver.find_function_argument_producers(graph, pe.inputs[0].id):
+                for name in PermissionSolver.find_function_argument_producers(graph, pe.inputs[0].id):
                     if name not in found:
                         found.add(name)
                         heap_objects.append(name)
@@ -485,13 +485,13 @@ class MemoryPermissionSolver:
         return tuple(heap_objects)
 
     @staticmethod
-    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Optional[Dict[PermissionVariable, Term]]:
-        free_vars: Set[PermissionVariable] = set()
+    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Optional[Dict[Variable, Term]]:
+        free_vars: Set[Variable] = set()
 
         for constraint in constraints:
             free_vars.update(constraint.get_free_variables())
 
-        assignment: Dict[PermissionVariable, RWPermissionPCM.Element] = {}
+        assignment: Dict[Variable, RWPermissionPCM.Element] = {}
         assignment_defined = smt.TRUE()
 
         for var in free_vars:
@@ -500,7 +500,7 @@ class MemoryPermissionSolver:
             assignment_defined = smt.And(assignment_defined, defined)
 
         pcm = RWPermissionPCM(heap_objects)
-        solution: Dict[PermissionVariable, Term] = {}
+        solution: Dict[Variable, Term] = {}
 
         formula_to_constraint = {}
 
@@ -534,7 +534,7 @@ class GlobalPermissionVarCounter:
     counter: int = 0
 
     @staticmethod
-    def get_fresh_permission_var(prefix: str = "p") -> PermissionVariable:
-        var = PermissionVariable(f"{prefix}{GlobalPermissionVarCounter.counter}")
+    def get_fresh_permission_var(prefix: str = "p") -> Variable:
+        var = Variable(f"{prefix}{GlobalPermissionVarCounter.counter}")
         GlobalPermissionVarCounter.counter += 1
         return var

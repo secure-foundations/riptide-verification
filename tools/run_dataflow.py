@@ -7,7 +7,7 @@ import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
 from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH
-from semantics.dataflow.permission import MemoryPermissionSolver
+from semantics.dataflow.permission import PermissionSolver
 
 
 def main():
@@ -35,7 +35,7 @@ def main():
 
     print("function argument to SMT variables:", free_vars)
 
-    heap_objects = MemoryPermissionSolver.get_static_heap_objects(dfg)
+    heap_objects = PermissionSolver.get_static_heap_objects(dfg)
 
     configs = [(Configuration.get_initial_configuration(dfg, free_vars), 0)]
     num_terminating_configs = 0
@@ -83,7 +83,7 @@ def main():
 
             # Check memory permission constraints
             print(f"  {len(config.permission_constraints)} permission constraint(s)")
-            solution = MemoryPermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
+            solution = PermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
             # for constraint in config.permission_constraints:
             #     print(f"  {constraint}")
             if solution is None:

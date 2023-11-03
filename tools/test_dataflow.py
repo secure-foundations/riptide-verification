@@ -7,7 +7,7 @@ import semantics.smt as smt
 from semantics.matching import *
 from semantics.dataflow.graph import DataflowGraph
 from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH, CarryOperator, PermissionedValue
-from semantics.dataflow.permission import MemoryPermissionSolver, PermissionVariable
+from semantics.dataflow.permission import PermissionSolver, Variable
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
 
     config = Configuration.get_initial_configuration(dfg, free_vars)
 
-    dummy_permission = PermissionVariable("dummy")
+    dummy_permission = Variable("dummy")
 
     # See examples/bisim/test-1.png for operator and channel IDs
     loop_header_2 = config.copy()
@@ -103,7 +103,7 @@ def main():
 
     #         # Check memory permission constraints
     #         print(f"  {len(config.permission_constraints)} permission constraint(s)")
-    #         solution = MemoryPermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
+    #         solution = PermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
     #         # for constraint in config.permission_constraints:
     #         #     print(f"  {constraint}")
     #         if solution is None:

@@ -7,7 +7,7 @@ from pysmt.shortcuts import ( # type: ignore
     TRUE, FALSE, And, Or, Not, Xor, ExactlyOne, Implies, Iff, ForAll, Exists, Ite, Equals,
     GT, GE, LT, LE,
     BV, Int, Bool,
-    get_model, Solver,
+    get_model, get_unsat_core, Solver, UnsatCoreSolver,
     Array, Select,
     get_free_variables,
     Plus, Store, Times,
@@ -48,7 +48,7 @@ def BVConst(value: int, width: int) -> SMTTerm:
 
 def reset() -> None:
     """
-    (Re-)initialize global state 
+    (Re-)initialize global state
     """
     global _fresh_sort_counter
     _fresh_sort_counter = 0

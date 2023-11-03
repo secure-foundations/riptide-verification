@@ -502,12 +502,16 @@ class MemoryPermissionSolver:
         pcm = RWPermissionPCM(heap_objects)
         solution: Dict[PermissionVariable, Term] = {}
 
+        formula_to_constraint = {}
+
+        # with smt.UnsatCoreSolver(name="z3") as solver:
         with smt.Solver(name="z3") as solver:
             solver.add_assertion(assignment_defined)
 
             for constraint in constraints:
                 valid = pcm.interpret_formula(assignment, constraint)
                 solver.add_assertion(valid)
+                formula_to_constraint[valid] = constraint
 
             if solver.solve():
                 model = solver.get_model()
@@ -519,6 +523,10 @@ class MemoryPermissionSolver:
                 return solution
 
             else:
+                # unsat_core = tuple(solver.get_unsat_core())
+                # for unsat_core_formula in unsat_core:
+                #     print(formula_to_constraint[unsat_core_formula])
+                # print(len(unsat_core))
                 return None
 
 

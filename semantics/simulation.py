@@ -398,6 +398,26 @@ class SimulationChecker:
 
         return None
 
+    def refresh_exec_permission_vars(self, constraints: Iterable[dataflow.Formula]) -> Tuple[dataflow.Formula, ...]:
+        """
+        Replace all exec-* permission vars with fresh ones
+        """
+        constraints = tuple(constraints)
+
+        free_vars = set()
+        substitution: OrderedDict[dataflow.PermissionVariable, dataflow.PermissionVariable] = OrderedDict()
+
+        for constraint in constraints:
+            free_vars.update(constraint.get_free_variables())
+
+        for free_var in sorted(tuple(free_vars), key=lambda v: v.name):
+            if not free_var.name.startswith("cut-point-"):
+                assert free_var.name.startswith("exec-"), f"unexpected free var {free_var.name} from cut point {j} to {i}"
+                prefix = "-".join(free_var.name.split("-")[:-1])
+                substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+        return tuple(constraint.substitute(substitution) for constraint in constraints)
+
     def check_confluence(self):
         """
         Check the satifiability of the conjunction of all memory permission constraints
@@ -406,68 +426,76 @@ class SimulationChecker:
         constraints: List[dataflow.Formula] = []
 
         # cut point index |-> expansion size
-        expansion_size: List[int] = []
+        # expansion_size: List[int] = [1] * self.num_cut_points
 
-        for i in range(self.num_cut_points):
-            expansion_size.append(max(1, max(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
+        # for i in range(self.num_cut_points):
+        #     expansion_size.append(max(1, max(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
 
-        self.debug_common(f"using expansion sizes {expansion_size}")
+        # self.debug_common(f"using expansion sizes {expansion_size}")
 
         for j in range(self.num_cut_points):
             for i in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
-                    permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
-                    equality_constraint = dataflow.Conjunction(tuple(dataflow_branch.permission_equalities))
+                    permission_constraints = tuple(dataflow_branch.config.permission_constraints)
+                    equality_constraints = tuple(dataflow_branch.permission_equalities)
+                    constraints.extend(self.refresh_exec_permission_vars(permission_constraints + equality_constraints))
 
-                    for source_expansion_index in range(expansion_size[j]):
-                        substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
+                    # permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+                    # equality_constraint = dataflow.Conjunction(tuple(dataflow_branch.permission_equalities))
 
-                        for free_var in permission_constraint.get_free_variables():
-                            if free_var.name.startswith(f"cut-point-{j}"):
-                                # need consistent renaming here
-                                substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
-                            else:
-                                # refresh other variables
-                                assert not free_var.name.startswith("cut-point-"), f"unexpected free var {free_var.name} from cut point {j} to {i}"
-                                prefix = "-".join(free_var.name.split("-")[:-1])
-                                substitution[free_var] = self.get_fresh_permission_var(prefix)
+                    # for source_expansion_index in range(expansion_size[j]):
+                    #     substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
 
-                        substituted_permission_constraint = permission_constraint.substitute(substitution)
-                        substituted_equality_constraint = equality_constraint.substitute(substitution)
+                    #     for free_var in permission_constraint.get_free_variables():
+                    #         if free_var.name.startswith(f"cut-point-{j}"):
+                    #             # need consistent renaming here
+                    #             substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
+                    #         else:
+                    #             # refresh other variables
+                    #             assert not free_var.name.startswith("cut-point-"), f"unexpected free var {free_var.name} from cut point {j} to {i}"
+                    #             prefix = "-".join(free_var.name.split("-")[:-1])
+                    #             substitution[free_var] = self.get_fresh_permission_var(prefix)
 
-                        # state that the equality should only need to work for one of the expanded cut point
-                        disjuncts = []
-                        for target_expansion_index in range(expansion_size[i]):
-                            substitution = {}
-                            for free_var in self.dataflow_cut_points[i].get_free_permission_vars():
-                                assert free_var.name.startswith(f"cut-point-{i}")
-                                substitution[free_var] = dataflow.PermissionVariable(f"expansion-{target_expansion_index}-" + free_var.name)
-                            disjuncts.append(substituted_equality_constraint.substitute(substitution))
+                    #     substituted_permission_constraint = permission_constraint.substitute(substitution)
+                    #     substituted_equality_constraint = equality_constraint.substitute(substitution)
 
-                        substituted_equality_constraint = dataflow.Disjunction(tuple(disjuncts))
+                    #     # state that the equality should only need to work for one of the expanded cut point
+                    #     disjuncts = []
+                    #     for target_expansion_index in range(expansion_size[i]):
+                    #         substitution = {}
+                    #         for free_var in self.dataflow_cut_points[i].get_free_permission_vars():
+                    #             assert free_var.name.startswith(f"cut-point-{i}")
+                    #             substitution[free_var] = dataflow.PermissionVariable(f"expansion-{target_expansion_index}-" + free_var.name)
+                    #         disjuncts.append(substituted_equality_constraint.substitute(substitution))
 
-                        constraints.append(substituted_permission_constraint)
-                        constraints.append(substituted_equality_constraint)
+                    #     substituted_equality_constraint = dataflow.Disjunction(tuple(disjuncts))
+
+                    #     constraints.append(substituted_permission_constraint)
+                    #     constraints.append(substituted_equality_constraint)
 
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
-                permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+                constraints.extend(self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints))
 
-                for source_expansion_index in range(expansion_size[i]):
-                    substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
+                # constraints.extend(dataflow_branch.config.permission_constraints)
 
-                    for free_var in permission_constraint.get_free_variables():
-                        if free_var.name.startswith(f"cut-point-{i}"):
-                            # need consistent renaming here
-                            substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
-                        else:
-                            # refresh other variables
-                            assert not free_var.name.startswith("cut-point-")
-                            prefix = "-".join(free_var.name.split("-")[:-1])
-                            substitution[free_var] = self.get_fresh_permission_var(prefix)
+                # permission_constraint = dataflow.Conjunction(tuple(dataflow_branch.config.permission_constraints))
 
-                    substituted_permission_constraint = permission_constraint.substitute(substitution)
-                    constraints.append(substituted_permission_constraint)
+                # for source_expansion_index in range(expansion_size[i]):
+                #     substitution: Dict[dataflow.PermissionVariable, dataflow.PermissionVariable] = {}
+
+                #     for free_var in permission_constraint.get_free_variables():
+                #         if free_var.name.startswith(f"cut-point-{i}"):
+                #             # need consistent renaming here
+                #             substitution[free_var] = dataflow.PermissionVariable(f"expansion-{source_expansion_index}-" + free_var.name)
+                #         else:
+                #             # refresh other variables
+                #             assert not free_var.name.startswith("cut-point-")
+                #             prefix = "-".join(free_var.name.split("-")[:-1])
+                #             substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+                #     substituted_permission_constraint = permission_constraint.substitute(substitution)
+                #     constraints.append(substituted_permission_constraint)
 
         # for constraint in constraints:
         #     print("  -", constraint)

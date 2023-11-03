@@ -13,6 +13,10 @@ import semantics.dataflow as dataflow
 import semantics.llvm as llvm
 
 
+PERMISSION_PREFIX_CUT_POINT = "cut-point-"
+PERMISSION_PREFIX_CHANNEL = "channel-"
+
+
 @dataclass
 class LoopHeaderHint:
     block_name: str
@@ -101,9 +105,11 @@ class SimulationChecker:
         llvm_function: llvm.Function,
         loop_header_hints: Iterable[LoopHeaderHint],
         debug: bool = True,
+        permission_unsat_core: bool = False,
     ):
         self.debug = debug
         self.solver = smt.Solver(name="z3", random_seed=0)
+        self.permission_unsat_core = permission_unsat_core
 
         self.dataflow_graph = dataflow_graph
         self.llvm_function = llvm_function
@@ -412,7 +418,7 @@ class SimulationChecker:
 
         for free_var in sorted(tuple(free_vars), key=lambda v: v.name):
             if not free_var.name.startswith("cut-point-"):
-                assert free_var.name.startswith("exec-"), f"unexpected free var {free_var.name} from cut point {j} to {i}"
+                assert free_var.name.startswith("exec-"), f"unexpected free var {free_var.name}"
                 prefix = "-".join(free_var.name.split("-")[:-1])
                 substitution[free_var] = self.get_fresh_permission_var(prefix)
 
@@ -527,10 +533,14 @@ class SimulationChecker:
         self.debug_common(f"heap objects: {heap_object}")
         self.debug_common(f"checking sat of {len(constraints)} memory permission constraints")
 
-        # for constraint in constraints:
-        #     print(constraint)
+        for constraint in constraints:
+            print(constraint)
 
-        solution = dataflow.permission.PermissionSolver.solve_constraints(tuple(heap_object), constraints)
+        solution = dataflow.permission.PermissionSolver.solve_constraints(
+            tuple(heap_object),
+            constraints,
+            debug_unsat_core=self.permission_unsat_core,
+        )
         if solution is None:
             self.debug_common("unsat - may not be confluent")
         else:
@@ -684,9 +694,6 @@ class SimulationChecker:
                     # TODO: check if the generalized config matches anyway?
                     ...
             else:
-                if cut_point_index == 0:
-                    print(dataflow_cut_point.get_free_permission_vars())
-                    print(dataflow_branch.config.get_free_permission_vars())
                 self.final_dataflow_branches[cut_point_index].append(dataflow_branch)
 
     def generalize_dataflow_branch_to_cut_point(self, target_cut_point_index: int, branch: DataflowBranch) -> Tuple[dataflow.Configuration, Correspondence]:
@@ -695,24 +702,19 @@ class SimulationChecker:
 
         Returns the generalized template and a correspondence
         """
+        permission_prefix = f"{PERMISSION_PREFIX_CUT_POINT}{target_cut_point_index}-"
+
         # not copying self.dataflow_cut_points[0] since we want fresh permission variables
-        cut_point = dataflow.Configuration.get_initial_configuration(self.dataflow_graph, self.dataflow_params, self.solver, permission_prefix=f"cut-point-{target_cut_point_index}-")
+        cut_point = dataflow.Configuration.get_initial_configuration(self.dataflow_graph, self.dataflow_params, self.solver, permission_prefix)
 
         # Mapping from llvm var name |-> generalized dataflow variables corresponding to it
         llvm_var_correspondence: OrderedDict[str, List[smt.SMTTerm]] = OrderedDict()
 
         llvm_cut_point = self.llvm_cut_points[branch.llvm_branch.to_cut_point]
 
-        initial_permissions: List[dataflow.permission.Variable] = []
-        hold_permissions: List[dataflow.permission.Variable] = []
-
         # Mirror the operator states
         for pe_id, operator in enumerate(branch.config.operator_states):
             cut_point.operator_states[pe_id].transition_to(operator.current_transition)
-
-            # Refresh the internal permission variable
-            operator.internal_permission = self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-internal-{pe_id}-")
-            initial_permissions.append(cut_point.operator_states[pe_id].internal_permission)
 
             if isinstance(operator, dataflow.InvariantOperator) and \
                operator.current_transition == dataflow.InvariantOperator.loop:
@@ -735,8 +737,6 @@ class SimulationChecker:
         # Generalize the channel states
         for channel_id, channel_state in enumerate(branch.config.channel_states):
             if channel_state.hold_constant is not None:
-                initial_permissions.append(cut_point.channel_states[channel_id].hold_constant.permission)
-                hold_permissions.append(cut_point.channel_states[channel_id].hold_constant.permission)
                 continue
 
             if channel_state.count() == 0:
@@ -747,51 +747,30 @@ class SimulationChecker:
             # All channels should have at most one value
             assert channel_state.count() == 1, f"channel {channel_id} has more than one value"
 
-            channel = branch.config.graph.channels[channel_id]
-            dest_pe = branch.config.graph.vertices[channel.destination]
+            channel = self.dataflow_graph.channels[channel_id]
 
-            assert cut_point.channel_states[channel_id].count() <= 1, "ill-formed initial dataflow config"
-            if cut_point.channel_states[channel_id].ready():
-                cut_point.channel_states[channel_id].pop()
+            # Generalize the value in the channel and assign an LLVM correspondence
+            producer_llvm_var = self.find_non_steer_inv_producer_llvm_var(channel_id)
 
-            # If the destination is a carry, we need to simplify the decider condition to a constant
-            if dest_pe.operator == "CF_CFG_OP_CARRY" and channel.destination_port == 0:
-                assert False, f"carry operator {dest_pe.id} should be fired"
+            if producer_llvm_var is not None:
+                assert not cut_point.channel_states[channel_id].ready()
 
+                sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
+                fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
+                perm = self.get_fresh_permission_var(f"{permission_prefix}{PERMISSION_PREFIX_CHANNEL}{channel_id}-")
+                cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, perm))
+
+                assert llvm_cut_point.has_variable(producer_llvm_var), \
+                        f"corresponding llvm var {producer_llvm_var} of channel " \
+                        f"{channel_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
+                if producer_llvm_var not in llvm_var_correspondence:
+                    llvm_var_correspondence[producer_llvm_var] = []
+                llvm_var_correspondence[producer_llvm_var].append(fresh_var)
             else:
-                # Generalize the value in the channel and assign an LLVM correspondence
-                producer_llvm_var = self.find_non_steer_inv_producer_llvm_var(channel_id)
-
-                if producer_llvm_var is not None:
-                    sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
-                    fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
-                    perm = self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-channel-{channel_id}-")
-                    cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(fresh_var, perm))
-                    initial_permissions.append(perm)
-
-                    assert llvm_cut_point.has_variable(producer_llvm_var), \
-                           f"corresponding llvm var {producer_llvm_var} of channel {channel_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
-                    if producer_llvm_var not in llvm_var_correspondence:
-                        llvm_var_correspondence[producer_llvm_var] = []
-                    llvm_var_correspondence[producer_llvm_var].append(fresh_var)
-                else:
-                    if channel.source is None:
-                        # An unused constant value
-                        perm = self.get_fresh_permission_var(f"cut-point-{target_cut_point_index}-const-{channel_id}-")
-                        cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(branch.config.channel_states[channel_id].peek().term, perm))
-                        initial_permissions.append(perm)
-                    else:
-                        assert False, f"cannot find an llvm variable corresponding to a value in channel {channel.id}"
+                assert channel.source is None, f"cannot find an llvm variable corresponding to a non-constant value in channel {channel_id}"
 
         # Reset the permission constraints to include the permissions we created
-        cut_point.permission_constraints = []
-
-        # All initial permissions have to be disjoint
-        cut_point.permission_constraints.append(dataflow.permission.Disjoint(tuple(initial_permissions)))
-
-        # Hold permissions should be disjoint from itself (i.e. empty or read)
-        for perm in hold_permissions:
-            cut_point.permission_constraints.append(dataflow.permission.Disjoint((perm, perm)))
+        cut_point.permission_constraints = dataflow.Configuration.get_initial_permission_constraints(cut_point)
 
         # Construct a Correspondence object
         assert branch.llvm_branch.to_cut_point is not None

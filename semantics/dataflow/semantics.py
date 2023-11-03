@@ -15,6 +15,12 @@ from .graph import DataflowGraph, ProcessingElement, ConstantValue, FunctionArgu
 
 WORD_WIDTH = 32
 
+PERMISSION_PREFIX_EXEC = "exec-"
+PERMISSION_PREFIX_INTERNAL = "internal-"
+PERMISSION_PREFIX_HOLD_CONSTANT = "hold-"
+PERMISSION_PREFIX_CONSTANT = "const-"
+PERMISSION_PREFIX_OUTPUT_CHANNEL = "output-"
+
 
 TransitionFunction = Callable[..., Any]
 
@@ -570,10 +576,32 @@ class Configuration:
         )), tuple(permission_equalities)
 
     @staticmethod
-    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None, permission_prefix: str = ""):
+    def get_initial_permission_constraints(config: Configuration) -> List[permission.Formula]:
         initial_permissions: List[permission.Variable] = []
         hold_permissions: List[permission.Variable] = []
 
+        for operator_state in config.operator_states:
+            initial_permissions.append(operator_state.internal_permission)
+
+        for channel_state in config.channel_states:
+            if channel_state.hold_constant is not None:
+                initial_permissions.append(channel_state.hold_constant.permission)
+                hold_permissions.append(channel_state.hold_constant.permission)
+            else:
+                for value in channel_state.values:
+                    initial_permissions.append(value.permission)
+
+        # All initial permissions have to be disjoint
+        permission_constraints = [ permission.Disjoint(tuple(initial_permissions)) ]
+
+        # Hold permissions should be disjoint from itself (i.e. empty or read)
+        for perm in hold_permissions:
+            permission_constraints.append(permission.Disjoint((perm, perm)))
+
+        return permission_constraints
+
+    @staticmethod
+    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None, permission_prefix: str = ""):
         config = Configuration(graph, free_vars, solver=solver)
 
         # Initialize operator implementations
@@ -582,8 +610,7 @@ class Configuration:
             assert vertex.operator in Operator.OPERATOR_IMPL_MAP, \
                    f"unable to find an implementation for operator {vertex.operator}"
             impl = Operator.OPERATOR_IMPL_MAP[vertex.operator]
-            perm_var = config.get_fresh_permission_var(f"{permission_prefix}internal-{i}-")
-            initial_permissions.append(perm_var)
+            perm_var = config.get_fresh_permission_var(f"{permission_prefix}{PERMISSION_PREFIX_INTERNAL}{i}-")
             operator_states.append(impl(vertex, perm_var))
         config.operator_states = tuple(operator_states)
 
@@ -591,23 +618,19 @@ class Configuration:
         channel_states: List[ChannelState] = []
         for channel in config.graph.channels:
             if channel.constant is not None:
-                const_or_hold = "hold" if channel.hold else "const"
+                const_or_hold = PERMISSION_PREFIX_HOLD_CONSTANT if channel.hold else PERMISSION_PREFIX_CONSTANT
 
                 if isinstance(channel.constant, ConstantValue):
-                    value = config.get_fresh_permissioned_value(smt.BVConst(channel.constant.value, WORD_WIDTH), f"{permission_prefix}{const_or_hold}-{channel.id}-")
+                    value = config.get_fresh_permissioned_value(smt.BVConst(channel.constant.value, WORD_WIDTH), f"{permission_prefix}{const_or_hold}{channel.id}-")
 
                 else:
                     assert isinstance(channel.constant, FunctionArgument)
                     name = channel.constant.variable_name
                     assert name in config.free_vars, f"unable to find an assignment to free var {name}"
-                    value = config.get_fresh_permissioned_value(config.free_vars[name], f"{permission_prefix}{const_or_hold}-{channel.id}-")
-
-                initial_permissions.append(value.permission)
+                    value = config.get_fresh_permissioned_value(config.free_vars[name], f"{permission_prefix}{const_or_hold}{channel.id}-")
 
                 if channel.hold:
                     state = ChannelState(value)
-                    hold_permissions.append(value.permission)
-
                 else:
                     state = ChannelState()
                     state.push(value)
@@ -617,14 +640,9 @@ class Configuration:
                 state = ChannelState()
 
             channel_states.append(state)
+
         config.channel_states = tuple(channel_states)
-
-        # All initial permissions have to be disjoint
-        config.permission_constraints.append(permission.Disjoint(tuple(initial_permissions)))
-
-        # Hold permissions should be disjoint from itself (i.e. empty or read)
-        for perm in hold_permissions:
-            config.permission_constraints.append(permission.Disjoint((perm, perm)))
+        config.permission_constraints = list(Configuration.get_initial_permission_constraints(config))
 
         return config
 
@@ -864,7 +882,7 @@ class Configuration:
                 assert False, "unsupported permission for store/load"
 
         # Update internal permission
-        operator_state.internal_permission = self.get_fresh_permission_var(f"exec-internal-{pe_info.id}-")
+        operator_state.internal_permission = self.get_fresh_permission_var(f"{PERMISSION_PREFIX_EXEC}{PERMISSION_PREFIX_INTERNAL}{pe_info.id}-")
         output_permissions: List[permission.Variable] = [operator_state.internal_permission]
 
         if len(output_actions) == 1 and output_actions[0] is Branching:
@@ -907,7 +925,7 @@ class Configuration:
 
                 channels = pe_info.outputs[action.id]
                 for channel in channels:
-                    permissioned_value = self.get_fresh_permissioned_value(value.simplify(), f"exec-output-channel-{channel.id}-")
+                    permissioned_value = self.get_fresh_permissioned_value(value.simplify(), f"{PERMISSION_PREFIX_EXEC}{PERMISSION_PREFIX_OUTPUT_CHANNEL}{channel.id}-")
                     self.channel_states[channel.id].push(permissioned_value)
                     output_permissions.append(permissioned_value.permission)
 

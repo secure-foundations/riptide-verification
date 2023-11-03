@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-from typing import Set, Tuple, Iterable, List, Dict, Mapping, Optional
+from typing import Set, Tuple, Iterable, List, Dict, Mapping, Optional, Union
 from dataclasses import dataclass
 
 from .graph import DataflowGraph, FunctionArgument
@@ -485,7 +485,7 @@ class PermissionSolver:
         return tuple(heap_objects)
 
     @staticmethod
-    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula]) -> Optional[Dict[Variable, Term]]:
+    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula], debug_unsat_core: bool = False) -> Optional[Dict[Variable, Term]]:
         free_vars: Set[Variable] = set()
 
         for constraint in constraints:
@@ -502,16 +502,20 @@ class PermissionSolver:
         pcm = RWPermissionPCM(heap_objects)
         solution: Dict[Variable, Term] = {}
 
-        formula_to_constraint = {}
+        formula_to_constraint: Dict[smt.SMTTerm, Union[str, Formula]] = {}
 
-        # with smt.UnsatCoreSolver(name="z3") as solver:
-        with smt.Solver(name="z3") as solver:
+        with smt.UnsatCoreSolver(name="z3") if debug_unsat_core else smt.Solver(name="z3") as solver:
             solver.add_assertion(assignment_defined)
+
+            if debug_unsat_core:
+                formula_to_constraint[assignment_defined] = "(definedness of free variables)"
 
             for constraint in constraints:
                 valid = pcm.interpret_formula(assignment, constraint)
                 solver.add_assertion(valid)
-                formula_to_constraint[valid] = constraint
+
+                if debug_unsat_core:
+                    formula_to_constraint[valid] = constraint
 
             if solver.solve():
                 model = solver.get_model()
@@ -523,10 +527,11 @@ class PermissionSolver:
                 return solution
 
             else:
-                # unsat_core = tuple(solver.get_unsat_core())
-                # for unsat_core_formula in unsat_core:
-                #     print(formula_to_constraint[unsat_core_formula])
-                # print(len(unsat_core))
+                if debug_unsat_core:
+                    unsat_core = tuple(solver.get_unsat_core())
+                    for unsat_core_formula in unsat_core:
+                        print(formula_to_constraint[unsat_core_formula])
+                    print("unsat core size:", len(unsat_core))
                 return None
 
 

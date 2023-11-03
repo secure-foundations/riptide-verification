@@ -149,6 +149,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("o2p", help="Annotated o2p file")
     parser.add_argument("lso_ll", help="LLVM code after lso")
+    parser.add_argument("--permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed")
     args = parser.parse_args()
 
     with open(args.o2p) as dataflow_source:
@@ -164,7 +165,7 @@ def main():
         assert len(llvm_module.functions) == 1
         llvm_function = tuple(llvm_module.functions.values())[0]
 
-    sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints)
+    sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints, debug=True, permission_unsat_core=args.permission_unsat_core)
     sim_checker.match_llvm_branches()
     sim_checker.generate_dataflow_cut_points()
     sim_checker.check_dataflow_matches()

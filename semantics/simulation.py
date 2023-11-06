@@ -719,22 +719,24 @@ class SimulationChecker:
         # Reset the permission constraints to include the permissions we created
         cut_point.permission_constraints = dataflow.Configuration.get_initial_permission_constraints(cut_point)
 
-        # If there's a bit width mismatch, shrink the dataflow var to the bit width of the llvm var
-        for var_name, dataflow_vars in llvm_var_correspondence.items():
-            bit_width = self.llvm_function.definitions[var_name].get_type().get_bit_width()
-            assert bit_width <= dataflow.WORD_WIDTH
-            if bit_width < dataflow.WORD_WIDTH:
-                for i, dataflow_var in enumerate(dataflow_vars):
-                    dataflow_vars[i] = smt.BVExtract(dataflow_var, 0, bit_width - 1)
-
         # Construct a Correspondence object
         assert branch.llvm_branch.to_cut_point is not None
         correspondence = self.get_init_correspondence(cut_point, llvm_cut_point)
-        correspondence.var_correspondence = tuple(
-            (dataflow_var, llvm_cut_point.get_variable(llvm_var_name))
-            for llvm_var_name, dataflow_vars in llvm_var_correspondence.items()
-            for dataflow_var in dataflow_vars
-        )
+
+        # If there's a bit width mismatch, shrink the dataflow var to the bit width of the llvm var
+        temp_var_correspondence: List[Tuple[smt.SMTTerm, smt.SMTTerm]] = []
+        for llvm_var_name, dataflow_vars in llvm_var_correspondence.items():
+            bit_width = self.llvm_function.definitions[llvm_var_name].get_type().get_bit_width()
+            assert bit_width <= dataflow.WORD_WIDTH
+
+            for dataflow_var in dataflow_vars:
+                llvm_var = llvm_cut_point.get_variable(llvm_var_name)
+                if bit_width < dataflow.WORD_WIDTH:
+                    llvm_var = smt.BVZExt(llvm_var, dataflow.WORD_WIDTH - bit_width)
+
+                temp_var_correspondence.append(((dataflow_var, llvm_var)))
+
+        correspondence.var_correspondence = tuple(temp_var_correspondence)
 
         return cut_point, correspondence
 

@@ -160,6 +160,9 @@ def main():
             for loop in dataflow_graph_json["function"]["loops"]
         ]
 
+        for i, loop in enumerate(dataflow_graph_json["function"]["loops"]):
+            print(f"llvm cut point {i + 1}: header {loop['header']}, back edge {loop['back_edge']}")
+
     with open(args.lso_ll) as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
         assert len(llvm_module.functions) == 1

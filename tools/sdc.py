@@ -233,7 +233,7 @@ def main():
 
             # If input file has not changed since the last time the .o2p and .lso.ll files are generated
             # we skip the sdc call (because its output is non-deterministic)
-            if not check_dep([ input_file_name ], [ final_o2p_path, final_lso_ll_path ]):
+            if not check_dep([ input_file_name, env.lib_dc_path, __file__ ], [ final_o2p_path, final_lso_ll_path ]):
                 with open(sdc_log_path, "wb") as sdc_log_file:
                     cmd = [
                         env.opt_path,
@@ -251,6 +251,7 @@ def main():
                             "-fno-stream",
                             "-fno-dedup",
                             "-additional-id-lcssa",
+                            "-fno-array-dep",
                         ]
 
                     logger.info(f"running {shlex.join(cmd)}")

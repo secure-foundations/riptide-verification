@@ -1,13 +1,13 @@
 void bfs(
-	const int * restrict rows, 
-	const int * restrict cols, 
-	int count, 
-	int * restrict queue, 
-	int * restrict visited, 
-	int * restrict walk
-) 
+	const int * restrict rows,
+	const int * restrict cols,
+	int count,
+	int * queue,
+	int * visited,
+	int * walk
+)
 {
- 
+
 	int queue_front = 0;
 	int queue_back = 1;
 	int walk_pos = 0;

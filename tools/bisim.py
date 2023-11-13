@@ -12,6 +12,11 @@ from semantics.simulation import SimulationChecker, LoopHeaderHint
 import semantics.dataflow as dataflow
 import semantics.llvm as llvm
 
+from utils import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = None, permission_unsat_core: bool = False):
     """
@@ -27,7 +32,7 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
         ]
 
         for i, loop in enumerate(dataflow_graph_json["function"]["loops"]):
-            print(f"llvm cut point {i + 1}: header {loop['header']}, back edge {loop['back_edge']}")
+            logger.debug(f"llvm cut point {i + 1}: header {loop['header']}, back edge {loop['back_edge']}")
 
     with open(lso_ll_path) as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
@@ -37,7 +42,7 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
         else:
             llvm_function = llvm_module.functions[function_name]
 
-    sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints, debug=True, permission_unsat_core=permission_unsat_core)
+    sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints, permission_unsat_core=permission_unsat_core)
     sim_checker.run_all_checks()
 
 
@@ -47,7 +52,9 @@ def main():
     parser.add_argument("lso_ll", help="LLVM code after lso")
     parser.add_argument("--function", help="Specify a function name to check")
     parser.add_argument("--permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed")
+    logging.add_arguments(parser)
     args = parser.parse_args()
+    logging.basic_config(args)
 
     run_bisim(args.o2p, args.lso_ll, args.function, args.permission_unsat_core)
 

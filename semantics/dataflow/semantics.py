@@ -374,7 +374,7 @@ class LoadOperator(Operator):
             assert False, "unexpected number of input channels to the store operator"
 
     def is_at_start(self) -> bool:
-        return self.current_transition == StoreOperator.start_2 or self.current_transition == StoreOperator.start_3
+        return self.current_transition == LoadOperator.start_2 or self.current_transition == LoadOperator.start_3
 
     def start_2(self, config: Configuration, base: ChannelId(0), index: ChannelId(1)) -> ChannelId(0):
         return config.read_memory(base, index)

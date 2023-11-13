@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from collections import OrderedDict
 
 import sys
+import logging
 
 import semantics.smt as smt
 from semantics.matching import *
 
 import semantics.dataflow as dataflow
 import semantics.llvm as llvm
+
+
+logger = logging.getLogger(__name__)
 
 
 PERMISSION_PREFIX_CUT_POINT = "cut-point-"
@@ -104,10 +108,8 @@ class SimulationChecker:
         dataflow_graph: dataflow.DataflowGraph,
         llvm_function: llvm.Function,
         loop_header_hints: Iterable[LoopHeaderHint],
-        debug: bool = True,
         permission_unsat_core: bool = False,
     ):
-        self.debug = debug
         self.solver = smt.Solver(name="z3", random_seed=0)
         self.permission_unsat_core = permission_unsat_core
 
@@ -196,18 +198,6 @@ class SimulationChecker:
     def get_fresh_permission_var(self, prefix: str) -> dataflow.permission.Variable:
         return dataflow.permission.GlobalPermissionVarCounter.get_fresh_permission_var(prefix)
 
-    def debug_common(self, *args, **kwargs):
-        if self.debug:
-            print("[common]", *args, **kwargs, file=sys.stderr, flush=True)
-
-    def debug_dataflow(self, *args, **kwargs):
-        if self.debug:
-            print("[dataflow]", *args, **kwargs, file=sys.stderr, flush=True)
-
-    def debug_llvm(self, *args, **kwargs):
-        if self.debug:
-            print("[llvm]", *args, **kwargs, file=sys.stderr, flush=True)
-
     def get_pe_id_from_llvm_position(self, position: Tuple[str, int]) -> Optional[int]:
         return self.llvm_position_to_pe_id.get(position)
 
@@ -217,7 +207,7 @@ class SimulationChecker:
         This will fill up self.matched_llvm_branches and self.final_llvm_branches
         """
         for i, llvm_cut_point in enumerate(self.llvm_cut_points):
-            self.debug_llvm(f"running cut point {i}")
+            logger.debug(f"[llvm] running cut point {i}")
 
             # Queue of pairs of (llvm config, trace)
             queue: List[Tuple[llvm.Configuration, Tuple[Tuple[str, int], ...]]] = [
@@ -236,7 +226,7 @@ class SimulationChecker:
                             match_result = llvm_cut_point.match(result.config)
                             if isinstance(match_result, MatchingSuccess):
                                 assert match_result.check_condition(), f"invalid match at cut point {j}"
-                                self.debug_llvm(f"found a matching config to cut point {j}")
+                                logger.debug(f"[llvm] found a matching config to cut point {j}")
                                 self.matched_llvm_branches[j][i].append(LLVMBranch(result.config, match_result, new_trace, i, j))
                                 break
                         else:
@@ -244,7 +234,7 @@ class SimulationChecker:
                             queue.append((result.config, new_trace))
 
                     elif isinstance(result, llvm.FunctionReturn):
-                        self.debug_llvm("found a final config")
+                        logger.debug("[llvm] found a final config")
                         self.final_llvm_branches[i].append(LLVMBranch(config, None, new_trace, i, None))
 
                     else:
@@ -273,10 +263,10 @@ class SimulationChecker:
             else:
                 blame_left = smt.find_implication_blame(branch_conditions, left.path_conditions, self.solver)
                 blame_right = smt.find_implication_blame(branch_conditions, right.path_conditions, self.solver)
-                self.debug_common(f"correspondence: {correspondence}")
-                self.debug_common(f"llvm branch path conditions: {branch.config.path_conditions}")
-                self.debug_common(f"left blame:", blame_left)
-                self.debug_common(f"right blame:", blame_right)
+                logger.debug(f"correspondence: {correspondence}")
+                logger.debug(f"llvm branch path conditions: {branch.config.path_conditions}")
+                logger.debug(f"left blame: {blame_left}")
+                logger.debug(f"right blame: {blame_right}")
                 assert False, f"failed to categorize a llvm branch into neither dataflow branches"
 
         return left_branches, right_branches
@@ -404,8 +394,6 @@ class SimulationChecker:
                 # This instruction might have been coalesced into other PEs
                 continue
 
-            # print("running", pe_id)
-
             scheduled_pe_ids = (pe_id,)
             pe = self.dataflow_graph.vertices[pe_id]
             if pe.operator == "CF_CFG_OP_MERGE":
@@ -418,7 +406,7 @@ class SimulationChecker:
             elif len(results) > 1:
                 return branch(results)
             else:
-                self.debug_common(config)
+                logger.debug(config)
                 assert False, f"PE {pe_id} corresponding to llvm instruction {position} not ready when scheduled to fire"
 
             dataflow_branches = run_misc_operators()
@@ -514,8 +502,8 @@ class SimulationChecker:
         for i, constraint in enumerate(constraints):
             constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
 
-        self.debug_common(f"heap objects: {heap_object}")
-        self.debug_common(f"checking sat of {len(constraints)} memory permission constraints")
+        logger.debug(f"heap objects: {heap_object}")
+        logger.debug(f"checking sat of {len(constraints)} memory permission constraints")
 
         # for constraint in constraints:
         #     print(constraint)
@@ -526,13 +514,13 @@ class SimulationChecker:
             debug_unsat_core=self.permission_unsat_core,
         )
         if solution is None:
-            self.debug_common("unsat - may not be confluent")
+            logger.warning("unsat - may not be confluent")
         else:
-            self.debug_common("sat - confluent")
+            logger.debug("sat - confluent")
 
     def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):
         llvm_branch = dataflow_branch.llvm_branch
-        self.debug_common(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")
+        logger.debug(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")
 
         source_correspondence = self.correspondence[llvm_branch.from_cut_point]
         source_correspondence_smt = source_correspondence.to_smt_terms()
@@ -556,8 +544,8 @@ class SimulationChecker:
 
         if not smt.check_implication(source_correspondence_smt, obligations, self.solver):
             blame = smt.find_implication_blame(source_correspondence_smt, obligations, self.solver)
-            self.debug_common("knows:", source_correspondence)
-            self.debug_common("blame:\n" + "\n".join(map(lambda t: "  " + t.serialize(), blame)))
+            logger.debug("knows: {source_correspondence}")
+            logger.debug("blame:\n" + "\n".join(map(lambda t: "  " + t.serialize(), blame)))
             assert False, f"a branch from {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'} fails the bisimulation obligations"
 
     def check_bisimulation(self):
@@ -586,7 +574,7 @@ class SimulationChecker:
 
             for j in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
-                    self.debug_dataflow(f"checking a matched branch from cut point {j} to {i}")
+                    logger.debug(f"[dataflow] checking a matched branch from cut point {j} to {i}")
                     match_result, permission_equalities = target_dataflow_cut_point.match(dataflow_branch.config)
                     assert isinstance(match_result, MatchingSuccess), \
                            f"failed to match an expected dataflow branch from cut point {j} to {i}: {match_result.reason}"
@@ -597,11 +585,11 @@ class SimulationChecker:
         # Check that final configs actually terminates
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
-                self.debug_dataflow(f"checking a final branch from {i} is not fireable")
+                logger.debug(f"[dataflow] checking a final branch from {i} is not fireable")
 
                 for pe in self.dataflow_graph.vertices:
                     if dataflow_branch.config.is_fireable(pe.id):
-                        self.debug_dataflow(f"[warning] non-terminating final state: PE {pe.id} is still fireable")
+                        logger.warning(f"[dataflow] non-terminating final state: PE {pe.id} is still fireable")
 
     def generate_dataflow_cut_points(self):
         while True:
@@ -626,7 +614,7 @@ class SimulationChecker:
         This will fill in self.dataflow_cut_points at which point the specified cut point reaches
         """
 
-        self.debug_dataflow(f"mirroring llvm cut point {cut_point_index}")
+        logger.debug(f"[dataflow] mirroring llvm cut point {cut_point_index}")
 
         assert not self.dataflow_cut_points_executed[cut_point_index]
         self.dataflow_cut_points_executed[cut_point_index] = True
@@ -652,10 +640,10 @@ class SimulationChecker:
 
                 # Infer the target dataflow cut point
                 if self.dataflow_cut_points[target_cut_point] is None:
-                    self.debug_dataflow(f"inferring dataflow cut point {target_cut_point} using a dataflow trace from cut point {cut_point_index}")
+                    logger.debug(f"[dataflow] inferring dataflow cut point {target_cut_point} using a dataflow trace from cut point {cut_point_index}")
                     target_dataflow_cut_point, target_correspondence = self.generalize_dataflow_branch_to_cut_point(target_cut_point, dataflow_branch)
-                    self.debug_dataflow(f"inferred dataflow cut point {target_cut_point}\n{target_dataflow_cut_point}")
-                    self.debug_dataflow(f"inferred correspondence at cut point {target_cut_point}\n{target_correspondence}")
+                    logger.debug(f"[dataflow] inferred dataflow cut point {target_cut_point}\n{target_dataflow_cut_point}")
+                    logger.debug(f"[dataflow] inferred correspondence at cut point {target_cut_point}\n{target_correspondence}")
 
                     self.dataflow_cut_points[target_cut_point] = target_dataflow_cut_point
                     self.correspondence[target_cut_point] = target_correspondence

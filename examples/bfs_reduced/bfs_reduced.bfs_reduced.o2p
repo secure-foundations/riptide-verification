@@ -29,11 +29,11 @@
             "inputs": [
                 [
                     {
-                        "ID": 8,
+                        "ID": 19,
                         "hold": false,
-                        "name": "exitcond.not",
+                        "name": "len",
                         "oport": 0,
-                        "type": "data"
+                        "type": "xdata"
                     }
                 ],
                 [
@@ -43,30 +43,20 @@
                         "type": "const",
                         "value": 0
                     }
-                ],
-                [
-                    {
-                        "ID": 15,
-                        "hold": false,
-                        "name": "lso.alloc1.1.merge.",
-                        "oport": 0,
-                        "type": "data"
-                    }
                 ]
             ],
-            "llvm_block": "for.cond",
+            "llvm_block": "entry",
             "llvm_index": 0,
-            "name": "lso.alloc1.0.carry..f.",
-            "op": "CF_CFG_OP_CARRY",
-            "pred": "CF_CFG_PRED_FALSE",
-            "type": "CF_FU_CFG_T"
+            "name": "%0",
+            "op": "ARITH_CFG_OP_SGT",
+            "type": "ARITH_FU_CFG_T"
         },
         {
             "ID": 1,
             "inputs": [
                 [
                     {
-                        "ID": 4,
+                        "ID": 0,
                         "hold": false,
                         "name": "%0",
                         "oport": 0,
@@ -102,242 +92,7 @@
             "inputs": [
                 [
                     {
-                        "ID": 17,
-                        "hold": true,
-                        "name": "A",
-                        "oport": 0,
-                        "type": "xdata"
-                    }
-                ],
-                [
-                    {
-                        "ID": 12,
-                        "hold": false,
-                        "name": "%1",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 9,
-                        "hold": false,
-                        "name": "lso.alloc1.0.steer..f.2",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "llvm_block": "for.body",
-            "llvm_index": 3,
-            "name": "%2",
-            "op": "MEM_CFG_OP_LOAD",
-            "type": "MEM_FU_CFG_T"
-        },
-        {
-            "ID": 3,
-            "inputs": [
-                [
-                    {
-                        "ID": 8,
-                        "hold": false,
-                        "name": "exitcond.not",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 1,
-                        "hold": false,
-                        "name": "smax",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "name": "smax.invar.invar..f.",
-            "op": "CF_CFG_OP_INVARIANT",
-            "pred": "CF_CFG_PRED_FALSE",
-            "type": "CF_FU_CFG_T"
-        },
-        {
-            "ID": 4,
-            "inputs": [
-                [
-                    {
-                        "ID": 19,
-                        "hold": false,
-                        "name": "len",
-                        "oport": 0,
-                        "type": "xdata"
-                    }
-                ],
-                [
-                    {
-                        "hold": false,
-                        "name": "0",
-                        "type": "const",
-                        "value": 0
-                    }
-                ]
-            ],
-            "llvm_block": "entry",
-            "llvm_index": 0,
-            "name": "%0",
-            "op": "ARITH_CFG_OP_SGT",
-            "type": "ARITH_FU_CFG_T"
-        },
-        {
-            "ID": 5,
-            "inputs": [
-                [
-                    {
-                        "ID": 14,
-                        "hold": false,
-                        "name": "tobool.not",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 9,
-                        "hold": false,
-                        "name": "lso.alloc1.0.steer..f.2",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "name": "lso.alloc1.0.steer..f.",
-            "op": "CF_CFG_OP_STEER",
-            "pred": "CF_CFG_PRED_FALSE",
-            "type": "CF_FU_CFG_T"
-        },
-        {
-            "ID": 6,
-            "inputs": [
-                [
-                    {
-                        "ID": 8,
-                        "hold": false,
-                        "name": "exitcond.not",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 10,
-                        "hold": false,
-                        "name": "i.0.carry..f.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "name": "i.0.steer..f.",
-            "op": "CF_CFG_OP_STEER",
-            "pred": "CF_CFG_PRED_FALSE",
-            "type": "CF_FU_CFG_T"
-        },
-        {
-            "ID": 7,
-            "inputs": [
-                [
-                    {
                         "ID": 11,
-                        "hold": false,
-                        "name": "arrayidx1.steer..t.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "hold": true,
-                        "name": "0",
-                        "type": "const",
-                        "value": 0
-                    }
-                ],
-                [
-                    {
-                        "hold": true,
-                        "name": "1",
-                        "type": "const",
-                        "value": 1
-                    }
-                ]
-            ],
-            "llvm_block": "if.then",
-            "llvm_index": 0,
-            "name": "%3",
-            "op": "MEM_CFG_OP_STORE",
-            "type": "MEM_FU_CFG_T"
-        },
-        {
-            "ID": 8,
-            "inputs": [
-                [
-                    {
-                        "ID": 10,
-                        "hold": false,
-                        "name": "i.0.carry..f.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 3,
-                        "hold": false,
-                        "name": "smax.invar.invar..f.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "llvm_block": "for.cond",
-            "llvm_index": 2,
-            "name": "exitcond.not",
-            "op": "ARITH_CFG_OP_EQ",
-            "type": "ARITH_FU_CFG_T"
-        },
-        {
-            "ID": 9,
-            "inputs": [
-                [
-                    {
-                        "ID": 8,
-                        "hold": false,
-                        "name": "exitcond.not",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ],
-                [
-                    {
-                        "ID": 0,
-                        "hold": false,
-                        "name": "lso.alloc1.0.carry..f.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "name": "lso.alloc1.0.steer..f.2",
-            "op": "CF_CFG_OP_STEER",
-            "pred": "CF_CFG_PRED_FALSE",
-            "type": "CF_FU_CFG_T"
-        },
-        {
-            "ID": 10,
-            "inputs": [
-                [
-                    {
-                        "ID": 8,
                         "hold": false,
                         "name": "exitcond.not",
                         "oport": 0,
@@ -370,94 +125,38 @@
             "type": "CF_FU_CFG_T"
         },
         {
-            "ID": 11,
+            "ID": 3,
             "inputs": [
                 [
                     {
-                        "ID": 14,
+                        "ID": 11,
                         "hold": false,
-                        "name": "tobool.not",
+                        "name": "exitcond.not",
                         "oport": 0,
                         "type": "data"
                     }
                 ],
                 [
                     {
-                        "ID": 13,
+                        "ID": 1,
                         "hold": false,
-                        "name": "arrayidx1",
+                        "name": "smax",
                         "oport": 0,
                         "type": "data"
                     }
                 ]
             ],
-            "name": "arrayidx1.steer..t.",
-            "op": "CF_CFG_OP_STEER",
-            "pred": "CF_CFG_PRED_TRUE",
+            "name": "smax.invar.invar..f.",
+            "op": "CF_CFG_OP_INVARIANT",
+            "pred": "CF_CFG_PRED_FALSE",
             "type": "CF_FU_CFG_T"
         },
         {
-            "ID": 12,
+            "ID": 4,
             "inputs": [
-                [
-                    {
-                        "ID": 18,
-                        "hold": true,
-                        "name": "B",
-                        "oport": 0,
-                        "type": "xdata"
-                    }
-                ],
-                [
-                    {
-                        "ID": 6,
-                        "hold": false,
-                        "name": "i.0.steer..f.",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "llvm_block": "for.body",
-            "llvm_index": 1,
-            "name": "%1",
-            "op": "MEM_CFG_OP_LOAD",
-            "type": "MEM_FU_CFG_T"
-        },
-        {
-            "ID": 13,
-            "inputs": [
-                [
-                    {
-                        "ID": 17,
-                        "hold": true,
-                        "name": "A",
-                        "oport": 0,
-                        "type": "xdata"
-                    }
-                ],
                 [
                     {
                         "ID": 12,
-                        "hold": false,
-                        "name": "%1",
-                        "oport": 0,
-                        "type": "data"
-                    }
-                ]
-            ],
-            "llvm_block": "for.body",
-            "llvm_index": 2,
-            "name": "arrayidx1",
-            "op": "ARITH_CFG_OP_GEP",
-            "type": "ARITH_FU_CFG_T"
-        },
-        {
-            "ID": 14,
-            "inputs": [
-                [
-                    {
-                        "ID": 2,
                         "hold": false,
                         "name": "%2",
                         "oport": 0,
@@ -480,11 +179,130 @@
             "type": "ARITH_FU_CFG_T"
         },
         {
-            "ID": 15,
+            "ID": 5,
             "inputs": [
                 [
                     {
-                        "ID": 14,
+                        "ID": 11,
+                        "hold": false,
+                        "name": "exitcond.not",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": false,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ],
+                [
+                    {
+                        "ID": 9,
+                        "hold": false,
+                        "name": "lso.alloc1.1.merge.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "llvm_block": "for.cond",
+            "llvm_index": 0,
+            "name": "lso.alloc1.0.carry..f.",
+            "op": "CF_CFG_OP_CARRY",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 6,
+            "inputs": [
+                [
+                    {
+                        "ID": 11,
+                        "hold": false,
+                        "name": "exitcond.not",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 5,
+                        "hold": false,
+                        "name": "lso.alloc1.0.carry..f.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "lso.alloc1.0.steer..f.2",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 7,
+            "inputs": [
+                [
+                    {
+                        "ID": 11,
+                        "hold": false,
+                        "name": "exitcond.not",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 2,
+                        "hold": false,
+                        "name": "i.0.carry..f.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "i.0.steer..f.",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 8,
+            "inputs": [
+                [
+                    {
+                        "ID": 18,
+                        "hold": true,
+                        "name": "B",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 7,
+                        "hold": false,
+                        "name": "i.0.steer..f.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "llvm_block": "for.body",
+            "llvm_index": 1,
+            "name": "%1",
+            "op": "MEM_CFG_OP_LOAD",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
+            "ID": 9,
+            "inputs": [
+                [
+                    {
+                        "ID": 4,
                         "hold": false,
                         "name": "tobool.not",
                         "oport": 0,
@@ -493,7 +311,7 @@
                 ],
                 [
                     {
-                        "ID": 7,
+                        "ID": 15,
                         "hold": false,
                         "name": "%3",
                         "oport": 0,
@@ -502,7 +320,7 @@
                 ],
                 [
                     {
-                        "ID": 5,
+                        "ID": 13,
                         "hold": false,
                         "name": "lso.alloc1.0.steer..f.",
                         "oport": 0,
@@ -517,11 +335,193 @@
             "type": "CF_FU_CFG_T"
         },
         {
+            "ID": 10,
+            "inputs": [
+                [
+                    {
+                        "ID": 17,
+                        "hold": true,
+                        "name": "A",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 8,
+                        "hold": false,
+                        "name": "%1",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "llvm_block": "for.body",
+            "llvm_index": 2,
+            "name": "arrayidx1",
+            "op": "ARITH_CFG_OP_GEP",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 11,
+            "inputs": [
+                [
+                    {
+                        "ID": 2,
+                        "hold": false,
+                        "name": "i.0.carry..f.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 3,
+                        "hold": false,
+                        "name": "smax.invar.invar..f.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "llvm_block": "for.cond",
+            "llvm_index": 2,
+            "name": "exitcond.not",
+            "op": "ARITH_CFG_OP_EQ",
+            "type": "ARITH_FU_CFG_T"
+        },
+        {
+            "ID": 12,
+            "inputs": [
+                [
+                    {
+                        "ID": 17,
+                        "hold": true,
+                        "name": "A",
+                        "oport": 0,
+                        "type": "xdata"
+                    }
+                ],
+                [
+                    {
+                        "ID": 8,
+                        "hold": false,
+                        "name": "%1",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 6,
+                        "hold": false,
+                        "name": "lso.alloc1.0.steer..f.2",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "llvm_block": "for.body",
+            "llvm_index": 3,
+            "name": "%2",
+            "op": "MEM_CFG_OP_LOAD",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
+            "ID": 13,
+            "inputs": [
+                [
+                    {
+                        "ID": 4,
+                        "hold": false,
+                        "name": "tobool.not",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 6,
+                        "hold": false,
+                        "name": "lso.alloc1.0.steer..f.2",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "lso.alloc1.0.steer..f.",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_FALSE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 14,
+            "inputs": [
+                [
+                    {
+                        "ID": 4,
+                        "hold": false,
+                        "name": "tobool.not",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "ID": 10,
+                        "hold": false,
+                        "name": "arrayidx1",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ]
+            ],
+            "name": "arrayidx1.steer..t.",
+            "op": "CF_CFG_OP_STEER",
+            "pred": "CF_CFG_PRED_TRUE",
+            "type": "CF_FU_CFG_T"
+        },
+        {
+            "ID": 15,
+            "inputs": [
+                [
+                    {
+                        "ID": 14,
+                        "hold": false,
+                        "name": "arrayidx1.steer..t.",
+                        "oport": 0,
+                        "type": "data"
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "0",
+                        "type": "const",
+                        "value": 0
+                    }
+                ],
+                [
+                    {
+                        "hold": true,
+                        "name": "1",
+                        "type": "const",
+                        "value": 1
+                    }
+                ]
+            ],
+            "llvm_block": "if.then",
+            "llvm_index": 0,
+            "name": "%3",
+            "op": "MEM_CFG_OP_STORE",
+            "type": "MEM_FU_CFG_T"
+        },
+        {
             "ID": 16,
             "inputs": [
                 [
                     {
-                        "ID": 6,
+                        "ID": 7,
                         "hold": false,
                         "name": "i.0.steer..f.",
                         "oport": 0,

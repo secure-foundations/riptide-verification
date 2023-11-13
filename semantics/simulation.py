@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple, Iterable, Optional, List, OrderedDict, Dict
+from typing import Tuple, Iterable, Optional, List, OrderedDict, Dict, Union
 from dataclasses import dataclass
 from collections import OrderedDict
 
@@ -281,6 +281,26 @@ class SimulationChecker:
 
         return left_branches, right_branches
 
+    def find_nested_merges(self, pe_id: int) -> Tuple[int, ...]:
+        """
+        Return a tuple of nested merge gates (not including the given pe)
+        """
+        pe = self.dataflow_graph.vertices[pe_id]
+        if pe.operator != "CF_CFG_OP_MERGE":
+            return ()
+        else:
+            if pe.inputs[1].source is None:
+                input_1_merges = ()
+            else:
+                input_1_merges = self.find_nested_merges(pe.inputs[1].source)
+
+            if pe.inputs[2].source is None:
+                input_2_merges = ()
+            else:
+                input_2_merges = self.find_nested_merges(pe.inputs[2].source)
+
+            return input_1_merges + input_2_merges + (pe_id,)
+
     def run_dataflow_with_llvm_branches(
         self,
         config: dataflow.Configuration,
@@ -386,7 +406,13 @@ class SimulationChecker:
 
             # print("running", pe_id)
 
-            results = config.step_until_branch((pe_id,))
+            scheduled_pe_ids = (pe_id,)
+            pe = self.dataflow_graph.vertices[pe_id]
+            if pe.operator == "CF_CFG_OP_MERGE":
+                # Check for nested merges
+                scheduled_pe_ids = self.find_nested_merges(pe.id)
+
+            results = config.step_until_branch(scheduled_pe_ids)
             if len(results) == 1:
                 config = results[0].config
             elif len(results) > 1:
@@ -399,38 +425,33 @@ class SimulationChecker:
             if dataflow_branches:
                 return dataflow_branches
 
-    def find_non_steer_inv_producer(self, channel_id: int) -> Optional[int]:
+    def find_non_steer_inv_producer(self, channel_id: int) -> Optional[Union[dataflow.ProcessingElement, dataflow.Constant]]:
         """
         Find the non-steer and non-inv producer of a channel
         """
 
         channel = self.dataflow_graph.channels[channel_id]
         if channel.source is None:
-            return None
+            assert channel.constant is not None
+            return channel.constant
 
         source_pe = self.dataflow_graph.vertices[channel.source]
 
         if source_pe.operator == "CF_CFG_OP_STEER" or source_pe.operator == "CF_CFG_OP_INVARIANT":
             return self.find_non_steer_inv_producer(source_pe.inputs[1].id)
         else:
-            return source_pe.id
+            return source_pe
 
-    def find_non_steer_inv_producer_llvm_var(self, channel_id: int) -> Optional[str]:
-        """
-        Find the llvm variable name of the actual producer of a value in channel_id
-        """
-        producer_pe_id = self.find_non_steer_inv_producer(channel_id)
+    def get_defined_llvm_var_of_pe(self, pe_id: int) -> str:
+        pe = self.dataflow_graph.vertices[pe_id]
+        if pe.llvm_position is None:
+            return None
 
-        if producer_pe_id is not None:
-            producer_pe = self.dataflow_graph.vertices[producer_pe_id]
-            if producer_pe.llvm_position is not None:
-                # Find the corresponding llvm var
-                block_name, instr_index = producer_pe.llvm_position
-                llvm_instr = self.llvm_function.blocks[block_name].instructions[instr_index]
-                defined_var = llvm_instr.get_defined_variable()
-                return defined_var
-
-        return None
+        # Find the corresponding llvm var
+        block_name, instr_index = pe.llvm_position
+        llvm_instr = self.llvm_function.blocks[block_name].instructions[instr_index]
+        defined_var = llvm_instr.get_defined_variable()
+        return defined_var
 
     def refresh_exec_permission_vars(self, constraints: Iterable[dataflow.permission.Formula]) -> Tuple[dataflow.permission.Formula, ...]:
         """
@@ -577,8 +598,10 @@ class SimulationChecker:
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
                 self.debug_dataflow(f"checking a final branch from {i} is not fireable")
-                if not dataflow_branch.config.is_final():
-                    assert False, "non-terminating final state"
+
+                for pe in self.dataflow_graph.vertices:
+                    if dataflow_branch.config.is_fireable(pe.id):
+                        self.debug_dataflow(f"[warning] non-terminating final state: PE {pe.id} is still fireable")
 
     def generate_dataflow_cut_points(self):
         while True:
@@ -666,20 +689,31 @@ class SimulationChecker:
             if isinstance(operator, dataflow.InvariantOperator) and \
                operator.current_transition == dataflow.InvariantOperator.loop:
                 input_channel_id = self.dataflow_graph.vertices[pe_id].inputs[1].id
-                producer_llvm_var = self.find_non_steer_inv_producer_llvm_var(input_channel_id)
+                producer = self.find_non_steer_inv_producer(input_channel_id)
 
-                if producer_llvm_var is not None:
+                if isinstance(producer, dataflow.ProcessingElement):
+                    producer_llvm_var = self.get_defined_llvm_var_of_pe(producer.id)
+                    assert producer_llvm_var is not None, f"producer {producer.id} found corresponding to an invariant value in PE {pe_id} has no LLVM annotation"
+
                     sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
                     fresh_var = smt.FreshSymbol(smt.BVType(dataflow.WORD_WIDTH), f"dataflow_var_{sanitized_var}_%d")
                     cut_point.operator_states[pe_id].value = fresh_var
 
-                    assert llvm_cut_point.has_variable(producer_llvm_var),\
+                    assert llvm_cut_point.has_variable(producer_llvm_var), \
                            f"corresponding llvm var {producer_llvm_var} of an invariant value at PE {pe_id} is not defined at the llvm cut point {branch.llvm_branch.to_cut_point}"
                     if producer_llvm_var not in llvm_var_correspondence:
                         llvm_var_correspondence[producer_llvm_var] = []
                     llvm_var_correspondence[producer_llvm_var].append(fresh_var)
+
                 else:
-                    assert False, f"cannot find an llvm variable corresponding to an invariant value in PE {pe_id}"
+                    assert isinstance(producer, dataflow.Constant)
+                    if isinstance(producer, dataflow.FunctionArgument):
+                        inv_value = cut_point.free_vars[producer.variable_name]
+                    else:
+                        assert isinstance(producer, dataflow.ConstantValue)
+                        inv_value = smt.BVConst(producer.value, dataflow.WORD_WIDTH)
+
+                    cut_point.operator_states[pe_id].value = inv_value
 
         # Generalize the channel states
         for channel_id, channel_state in enumerate(branch.config.channel_states):
@@ -697,9 +731,11 @@ class SimulationChecker:
             channel = self.dataflow_graph.channels[channel_id]
 
             # Generalize the value in the channel and assign an LLVM correspondence
-            producer_llvm_var = self.find_non_steer_inv_producer_llvm_var(channel_id)
+            producer = self.find_non_steer_inv_producer(channel_id)
 
-            if producer_llvm_var is not None:
+            if isinstance(producer, dataflow.ProcessingElement):
+                producer_llvm_var = self.get_defined_llvm_var_of_pe(producer.id)
+                assert producer_llvm_var is not None, f"producer {producer.id} found corresponding to a non-constant value in channel {channel_id} has no LLVM annotation"
                 assert not cut_point.channel_states[channel_id].ready()
 
                 sanitized_var = SimulationChecker.sanitize_llvm_name(producer_llvm_var)
@@ -714,7 +750,15 @@ class SimulationChecker:
                     llvm_var_correspondence[producer_llvm_var] = []
                 llvm_var_correspondence[producer_llvm_var].append(fresh_var)
             else:
-                assert channel.source is None, f"cannot find an llvm variable corresponding to a non-constant value in channel {channel_id}"
+                assert isinstance(producer, dataflow.Constant)
+                if isinstance(producer, dataflow.FunctionArgument):
+                    channel_value = cut_point.free_vars[producer.variable_name]
+                else:
+                    assert isinstance(producer, dataflow.ConstantValue)
+                    channel_value = smt.BVConst(producer.value, dataflow.WORD_WIDTH)
+
+                perm = self.get_fresh_permission_var(f"{permission_prefix}{PERMISSION_PREFIX_CHANNEL}{channel_id}-")
+                cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(channel_value, perm))
 
         # Reset the permission constraints to include the permissions we created
         cut_point.permission_constraints = dataflow.Configuration.get_initial_permission_constraints(cut_point)

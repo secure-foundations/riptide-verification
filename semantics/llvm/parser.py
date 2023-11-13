@@ -217,7 +217,7 @@ class Parser:
 
         INTEGER: /-?(0|[1-9][0-9]*)/
         INTEGER_TYPE: /i[1-9][0-9]*/
-        VARIABLE: /(%|@)((0|[1-9][0-9]*)|([A-Za-z.][A-Za-z0-9-_'.]*))/
+        VARIABLE: /(%|@)((0|[1-9][0-9]*)|([A-Za-z._][A-Za-z0-9-_'.]*))/
         BLOCK_LABEL: /[A-Za-z][A-Za-z0-9-_'.]*:/
         METADATA_LABEL: /!((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/
         ATTRIBUTE_GROUP_NAME: /\#((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/

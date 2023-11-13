@@ -52,6 +52,9 @@ class Operator:
         self.internal_permission: permission.Variable = permission
         self.current_transition: TransitionFunction = transition or type(self).start
 
+    def is_at_start(self) -> bool:
+        return self.current_transition == type(self).start
+
     def transition_to(self, transition: TransitionFunction):
         self.current_transition = transition
 
@@ -344,6 +347,9 @@ class StoreOperator(Operator):
         else:
             assert False, "unexpected number of input channels to the store operator"
 
+    def is_at_start(self) -> bool:
+        return self.current_transition == StoreOperator.start_3 or self.current_transition == StoreOperator.start_4
+
     def start_3(self, config: Configuration, base: ChannelId(0), index: ChannelId(1), value: ChannelId(2)) -> ChannelId(0):
         config.write_memory(base, index, value)
         return smt.BVConst(1, WORD_WIDTH)
@@ -366,6 +372,9 @@ class LoadOperator(Operator):
 
         else:
             assert False, "unexpected number of input channels to the store operator"
+
+    def is_at_start(self) -> bool:
+        return self.current_transition == StoreOperator.start_2 or self.current_transition == StoreOperator.start_3
 
     def start_2(self, config: Configuration, base: ChannelId(0), index: ChannelId(1)) -> ChannelId(0):
         return config.read_memory(base, index)
@@ -769,18 +778,25 @@ class Configuration:
 
         return "\n".join(lines)
 
-    def step_exhaust(self, pe_id: int) -> Tuple[StepResult, ...]:
+    def step_exhaust(self, pe_id: int, stop_at_start: bool = True) -> Tuple[StepResult, ...]:
         """
         Similar to step, but will attempt all possible transitions on the specified PE,
         including those after branching.
+
+        when stop_at_start is true, the execution will also stop if the PE hit the start transition again
+
         Note that this may not terminate on some PEs such as Stream
         """
 
         final_results = []
-        results = list(self.step(pe_id))
+        results: List[NextConfiguration] = list(self.step(pe_id))
 
         while len(results) != 0:
             result = results.pop(0)
+
+            if result.config.operator_states[pe_id].is_at_start():
+                final_results.append(result)
+                continue
 
             if isinstance(result, NextConfiguration):
                 next_results = result.config.step(pe_id)
@@ -940,7 +956,7 @@ class Configuration:
 
             return NextConfiguration(self),
 
-    def step_until_branch(self, pe_ids: Iterable[int], exhaust: bool = True) -> Tuple[StepResult, ...]:
+    def step_until_branch(self, pe_ids: Iterable[int], exhaust: bool = True, stop_at_start: bool = True) -> Tuple[StepResult, ...]:
         """
         Run the specified PEs in sequence and return immediately if branching happens.
         If all given PEs are not fireable, return ()
@@ -950,7 +966,7 @@ class Configuration:
         updated = False
 
         for pe_id in pe_ids:
-            results = self.step_exhaust(pe_id) if exhaust else self.step(pe_id)
+            results = self.step_exhaust(pe_id, stop_at_start) if exhaust else self.step(pe_id)
 
             if len(results) == 1:
                 assert isinstance(results[0], NextConfiguration)

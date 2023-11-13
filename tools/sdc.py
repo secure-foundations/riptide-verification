@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 import os
 import re
+import shlex
 import shutil
 import tempfile
 import argparse
@@ -96,6 +97,7 @@ def main():
     parser.add_argument("--lib-dc", help="Path to the libDC shared library (usually named libDC.{{so,dylib}})")
     parser.add_argument("--llvm-bin", help="Path to the LLVM and Clang binaries")
 
+    parser.add_argument("--normal", action="store_const", const=True, default=False, help="Disable some flags used for bisim, allow optimizations such as streamify")
     parser.add_argument("--gen-norm-ll", action="store_const", const=True, default=False, help="Generate LLVM code after some normalizations (.norm.ll)")
     parser.add_argument("--gen-lso-ll", action="store_const", const=True, default=False, help="Generate LLVM code after lso ordering (.lso.ll)")
     parser.add_argument("--gen-log", action="store_const", const=True, default=False, help="Generate compilation log (.log)")
@@ -112,15 +114,16 @@ def main():
     print(f"using clang {env.clang_path} (version {env.llvm_version})")
     print(f"using opt {env.opt_path} (version {env.llvm_version})")
 
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        print("tmp dir", tmp_dir)
+    tmp_dir = tempfile.mkdtemp()
+    delete = True
 
+    try:
         if input_file_name.endswith(".c"):
             base_name = os.path.basename(input_file_name)[:-2]
         else:
             assert input_file_name.endswith(".ll")
             base_name = os.path.basename(input_file_name)[:-3]
-        
+
         tmp_base_path = os.path.join(tmp_dir, base_name)
 
         if input_file_name.endswith(".c"):
@@ -130,48 +133,53 @@ def main():
             # clang -Oz -S -m32 -emit-llvm <C_FILE> -o <LL_FILE>
             clang_log_path = tmp_base_path + ".clang.log"
             with open(clang_log_path, "wb") as clang_log_file:
+                cmd = [
+                    env.clang_path,
+                    "-Oz",
+                    # "-DALIAS_RESTRICT", NOTE: might be used in the RipTide benchmark
+                    "-m32", # RipTide word width is 32-bit
+                    "-S",
+                    "-emit-llvm",
+                    input_file_name,
+                    "-o",
+                    ll_path,
+                ]
+                print(f"running {shlex.join(cmd)}")
                 result = subprocess.run(
-                    [
-                        env.clang_path,
-                        "-Oz",
-                        # "-DALIAS_RESTRICT", NOTE: might be used in the RipTide benchmark
-                        "-m32", # RipTide word width is 32-bit
-                        "-S",
-                        "-emit-llvm",
-                        input_file_name,
-                        "-o",
-                        ll_path,
-                    ],
+                    cmd,
                     stdout=clang_log_file,
                     stderr=clang_log_file,
                 )
 
-            if args.gen_log:
+            if args.gen_log or result.returncode != 0:
                 shutil.copy(clang_log_path, os.path.dirname(input_file_name))
+
             assert result.returncode == 0, f"clang failed with exit code {result.returncode}"
 
             # opt --enable-new-pm=0 -S -loop-simplify -simplifycfg -lcssa -mem2reg -loop-simplify <LL_FILE> -o <NORM_LL_FILE>
             opt_log_path = tmp_base_path + ".opt.log"
             with open(opt_log_path, "wb") as opt_log_file:
+                cmd = [
+                    env.opt_path,
+                    "--enable-new-pm=0",
+                    "-S",
+                    "-loop-simplify",
+                    "-simplifycfg",
+                    "-lcssa",
+                    "-mem2reg",
+                    "-loop-simplify",
+                    ll_path,
+                    "-o",
+                    norm_ll_path,
+                ]
+                print(f"running {shlex.join(cmd)}")
                 result = subprocess.run(
-                    [
-                        env.opt_path,
-                        "--enable-new-pm=0",
-                        "-S",
-                        "-loop-simplify",
-                        "-simplifycfg",
-                        "-lcssa",
-                        "-mem2reg",
-                        "-loop-simplify",
-                        ll_path,
-                        "-o",
-                        norm_ll_path,
-                    ],
+                    cmd,
                     stdout=opt_log_file,
                     stderr=opt_log_file,
                 )
 
-            if args.gen_log:
+            if args.gen_log or result.returncode != 0:
                 shutil.copy(opt_log_path, os.path.dirname(input_file_name))
 
             assert result.returncode == 0, f"opt failed with exit code {result.returncode}"
@@ -193,33 +201,48 @@ def main():
             o2p_path = os.path.join(tmp_dir, base_name + "." +  function_name[1:] + ".o2p")
 
             with open(sdc_log_path, "wb") as sdc_log_file:
-                result = subprocess.run(
-                    [
-                        env.opt_path,
-                        "-S",
-                        "-load", env.lib_dc_path,
-                        "-DC",
-                        "-func", function_name,
-                        "-json", o2p_path,
+                cmd = [
+                    env.opt_path,
+                    "-S",
+                    "-load", env.lib_dc_path,
+                    "-DC",
+                    "-func", function_name,
+                    "-json", o2p_path,
+                    "-lso-ll-out", lso_ll_path,
+                    norm_ll_path,
+                ]
+                if not args.normal:
+                    cmd += [
                         "-fno-hold-channel",
                         "-fno-stream",
+                        "-fno-dedup",
                         "-additional-id-lcssa",
-                        "-lso-ll-out", lso_ll_path,
-                        norm_ll_path,
-                    ],
+                    ]
+
+                print(f"running {shlex.join(cmd)}")
+                result = subprocess.run(
+                    cmd,
                     stdout=sdc_log_file,
                     stderr=sdc_log_file,
                 )
 
-            if args.gen_log:
+            if args.gen_log or result.returncode != 0:
                 shutil.copy(sdc_log_path, os.path.dirname(input_file_name))
-            
+
             assert result.returncode == 0, f"sdc failed with exit code {result.returncode}"
 
             if args.gen_lso_ll:
                 shutil.copy(lso_ll_path, os.path.dirname(input_file_name))
 
             shutil.copy(o2p_path, os.path.dirname(input_file_name))
+
+    except Exception as e:
+        delete = False
+        raise e
+
+    finally:
+        if delete:
+            shutil.rmtree(tmp_dir)
 
 
 if __name__ == "__main__":

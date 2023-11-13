@@ -793,3 +793,10 @@ class SimulationChecker:
             (dataflow_config.memory, llvm_config.memory),
             (),
         )
+
+    def run_all_checks(self):
+        self.match_llvm_branches()
+        self.generate_dataflow_cut_points()
+        self.check_dataflow_matches()
+        self.check_bisimulation()
+        self.check_confluence()

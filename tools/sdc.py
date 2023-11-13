@@ -1,25 +1,5 @@
 # This is a wrapper around https://github.com/CMUAbstract/sdc
 
-"""
-Pipeline:
-
-clang -Oz -DALIAS_RESTRICT -S -m32 -emit-llvm <C_FILE> -o <LL_FILE>
-
-opt --enable-new-pm=0 -S -loop-simplify -simplifycfg -lcssa -mem2reg -loop-simplify <LL_FILE> -o <NORM_LL_FILE>
-
-opt --enable-new-pm=0 -S \
-    -load <LIB_DC_FILE> \
-    -func=<FUNC_NAME> \
-    -DC \
-    -json=<O2P_FILE> \
-    -fno-hold-channel \
-    -fno-stream \
-    -additional-id-lcssa \
-    -lso-ll-out=<LSO_LL_FILE> \
-    <NORM_LL_FILE>
-    > /dev/null 2>&1
-"""
-
 from typing import Optional
 from dataclasses import dataclass
 
@@ -32,6 +12,8 @@ import argparse
 import subprocess
 
 import semantics.llvm as llvm
+
+from .bisim import run_bisim
 
 
 @dataclass
@@ -102,7 +84,15 @@ def main():
     parser.add_argument("--gen-lso-ll", action="store_const", const=True, default=False, help="Generate LLVM code after lso ordering (.lso.ll)")
     parser.add_argument("--gen-log", action="store_const", const=True, default=False, help="Generate compilation log (.log)")
 
+    parser.add_argument("--bisim", action="store_const", const=True, default=False,
+                        help="Enable bisimulation check after execution (this automatically disables --normal and enables --gen-lso-ll)")
+    parser.add_argument("--bisim-permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed (for --bisim)")
+
     args = parser.parse_args()
+
+    if args.bisim:
+        args.gen_lso_ll = True
+        assert not args.normal, "option --bisim cannot be used with --normal: some options enabled with --normal is not yet supported by the bisimulation checker"
 
     input_file_name = args.source_file
     assert input_file_name.endswith(".c") or input_file_name.endswith(".ll"), \
@@ -235,6 +225,9 @@ def main():
                 shutil.copy(lso_ll_path, os.path.dirname(input_file_name))
 
             shutil.copy(o2p_path, os.path.dirname(input_file_name))
+
+            if args.bisim:
+                run_bisim(o2p_path, lso_ll_path, function_name, args.bisim_permission_unsat_core)
 
     except Exception as e:
         delete = False

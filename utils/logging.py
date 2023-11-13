@@ -28,6 +28,8 @@ def add_arguments(parser):
     Add logging arguments to argparse.ArgumentParser
     """
 
+    parser.add_argument("--log-level", default="debug", help="Logging level name (debug, info, warning, error)")
+
 
 def basic_config(args):
     formatter = LeveledFormatter("[%(module)s] %(message)s")
@@ -37,4 +39,6 @@ def basic_config(args):
     handler = StreamHandler()
     handler.setFormatter(formatter)
 
-    basicConfig(level=DEBUG, handlers=[handler])
+    level = getLevelName((args.log_level or "debug").upper())
+    assert isinstance(level, int), f"unknown log level {args.log_level}"
+    basicConfig(level=level, handlers=[handler])

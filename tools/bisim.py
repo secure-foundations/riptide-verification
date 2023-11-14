@@ -7,7 +7,7 @@ from argparse import ArgumentParser
 
 import semantics.smt as smt
 from semantics.matching import *
-from semantics.simulation import SimulationChecker, LoopHeaderHint
+from semantics.simulation import SimulationChecker, BackEdgeOnly, IncomingAndBackEdge, LoopHeaderHint
 
 import semantics.dataflow as dataflow
 import semantics.llvm as llvm
@@ -18,7 +18,13 @@ from utils import logging
 logger = logging.getLogger(__name__)
 
 
-def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = None, permission_unsat_core: bool = False, cut_point_expansion: bool = False):
+def run_bisim(
+    o2p_path: str,
+    lso_ll_path: str,
+    function_name: Optional[str] = None,
+    permission_unsat_core: bool = False,
+    cut_point_expansion: bool = False,
+):
     """
     If function_name is not set, we assume the LLVM module only has one defined function
     """
@@ -26,13 +32,6 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
     with open(o2p_path) as dataflow_source:
         dataflow_graph_json = json.load(dataflow_source)
         dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(dataflow_graph_json)
-        loop_header_hints = [
-            LoopHeaderHint(loop["header"], loop["incoming"], loop["back_edge"])
-            for loop in dataflow_graph_json["function"]["loops"]
-        ]
-
-        for i, loop in enumerate(dataflow_graph_json["function"]["loops"]):
-            logger.debug(f"llvm cut point {i + 1}: header {loop['header']}, back edge {loop['back_edge']}")
 
     with open(lso_ll_path) as llvm_source:
         llvm_module = llvm.Parser.parse_module(llvm_source.read())
@@ -42,10 +41,16 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
         else:
             llvm_function = llvm_module.functions[function_name]
 
+    # Select a cut point placement
+    cut_point_placement = BackEdgeOnly(llvm_function, tuple(
+        LoopHeaderHint(loop["header"], loop["incoming"], loop["back_edge"])
+        for loop in dataflow_graph_json["function"]["loops"]
+    ))
+
     sim_checker = SimulationChecker(
         dataflow_graph,
         llvm_function,
-        loop_header_hints,
+        cut_point_placement,
         permission_unsat_core=permission_unsat_core,
         cut_point_expansion=cut_point_expansion,
     )

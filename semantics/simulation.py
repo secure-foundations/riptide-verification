@@ -26,8 +26,57 @@ class LoopHeaderHint:
     block_name: str
     incoming_block: str
     back_edge_block: str
-    # live_vars: Tuple[str, ...] # live variables (excluding parameters)
-    # lcssa_vars: Tuple[Tuple[str, str], ...] # pairs of (original var, lcssa var)
+
+
+class CutPointPlacement:
+    def __init__(self, llvm_function: llvm.Function, loop_header_hints: Iterable[LoopHeaderHint]):
+        self.llvm_function = llvm_function
+        self.loop_header_hints = tuple(loop_header_hints)
+
+    def gen_llvm_cut_points(self) -> Tuple[llvm.Configuration, ...]:
+        """
+        Generate all cut points excluding the initial one
+        """
+        raise NotImplementedError()
+
+
+class BackEdgeOnly(CutPointPlacement):
+    """
+    One cut point per loop back edge
+    """
+
+    def gen_llvm_cut_points(self) -> Tuple[llvm.Configuration, ...]:
+        cut_points = []
+
+        for header_info in self.loop_header_hints:
+            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+            llvm_cut_point.current_block = header_info.block_name
+            llvm_cut_point.previous_block = header_info.back_edge_block
+            cut_points.append(llvm_cut_point)
+
+        return tuple(cut_points)
+
+
+class IncomingAndBackEdge(CutPointPlacement):
+    """
+    Two cut points for each loop header: incoming and back edge
+    """
+
+    def gen_llvm_cut_points(self) -> Tuple[llvm.Configuration, ...]:
+        cut_points = []
+
+        for header_info in self.loop_header_hints:
+            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+            llvm_cut_point.current_block = header_info.block_name
+            llvm_cut_point.previous_block = header_info.incoming_block
+            cut_points.append(llvm_cut_point)
+
+            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+            llvm_cut_point.current_block = header_info.block_name
+            llvm_cut_point.previous_block = header_info.back_edge_block
+            cut_points.append(llvm_cut_point)
+
+        return tuple(cut_points)
 
 
 @dataclass
@@ -108,7 +157,7 @@ class SimulationChecker:
         self,
         dataflow_graph: dataflow.DataflowGraph,
         llvm_function: llvm.Function,
-        loop_header_hints: Iterable[LoopHeaderHint],
+        cut_point_placement: CutPointPlacement,
         permission_unsat_core: bool = False,
         cut_point_expansion: bool = True,
     ):
@@ -118,7 +167,6 @@ class SimulationChecker:
 
         self.dataflow_graph = dataflow_graph
         self.llvm_function = llvm_function
-        self.loop_header_hints = tuple(loop_header_hints)
 
         # Build a mapping from llvm position to PE id
         self.llvm_position_to_pe_id: Dict[Tuple[str, int], int] = {
@@ -164,12 +212,19 @@ class SimulationChecker:
         )
         llvm_init_config = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
 
-        self.num_cut_points = 1 + len(loop_header_hints)
-        self.dataflow_cut_points: List[Optional[dataflow.Configuration]] = [ dataflow_init_config ]
-        self.dataflow_cut_points_executed: List[bool] = [ False ] * self.num_cut_points
-        self.llvm_cut_points: List[llvm.Configuration] = [ llvm_init_config ]
+        self.llvm_cut_points: List[llvm.Configuration] = [ llvm_init_config, *cut_point_placement.gen_llvm_cut_points() ]
+        self.num_cut_points = len(self.llvm_cut_points)
 
-        self.correspondence: List[Optional[Correspondence]] = [ self.get_init_correspondence(dataflow_init_config, llvm_init_config) ]
+        for i, llvm_cut_point in enumerate(self.llvm_cut_points):
+            logger.debug(f"llvm cut point {i}: block {llvm_cut_point.current_block}, prev {llvm_cut_point.previous_block}")
+            llvm_cut_point.solver = self.solver
+
+        self.dataflow_cut_points: List[Optional[dataflow.Configuration]] = [ dataflow_init_config ] + [ None ] * (self.num_cut_points - 1)
+        self.correspondence: List[Optional[Correspondence]] = \
+            [ self.get_init_correspondence(dataflow_init_config, llvm_init_config) ] + [ None ] * (self.num_cut_points - 1)
+
+        self.num_cut_points = len(self.dataflow_cut_points)
+        self.dataflow_cut_points_executed: List[bool] = [ False ] * self.num_cut_points
 
         # self.matched_dataflow_branches[i][j] = branches from cut point j matched to cut point i
         self.matched_dataflow_branches: Tuple[Tuple[List[DataflowBranch], ...], ...] = tuple(
@@ -182,22 +237,6 @@ class SimulationChecker:
         )
         self.final_dataflow_branches: Tuple[List[DataflowBranch], ...] = tuple([] for _ in range(self.num_cut_points))
         self.final_llvm_branches: Tuple[List[LLVMBranch], ...] = tuple([] for _ in range(self.num_cut_points))
-
-        # For each loop header, generate LLVM cut point and a placeholder for dataflow cut point
-        for header_info in loop_header_hints:
-            # llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
-            # llvm_cut_point.current_block = header_info.block_name
-            # llvm_cut_point.previous_block = header_info.incoming_block
-            # self.dataflow_cut_points.append(None)
-            # self.llvm_cut_points.append(llvm_cut_point)
-            # self.correspondence.append(None)
-
-            llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
-            llvm_cut_point.current_block = header_info.block_name
-            llvm_cut_point.previous_block = header_info.back_edge_block
-            self.dataflow_cut_points.append(None)
-            self.llvm_cut_points.append(llvm_cut_point)
-            self.correspondence.append(None)
 
         self.permission_var_counter = 0
 
@@ -478,7 +517,7 @@ class SimulationChecker:
 
         if self.cut_point_expansion:
             for i in range(self.num_cut_points):
-                expansion_size.append(max(1, max(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
+                expansion_size.append(max(1, sum(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
 
             logger.debug(f"using cut point expansion sizes {expansion_size}")
         else:

@@ -779,7 +779,7 @@ class Configuration:
 
         return "\n".join(lines)
 
-    def step_exhaust(self, pe_id: int, stop_at_start: bool = True) -> Tuple[StepResult, ...]:
+    def step_exhaust(self, pe_id: int, stop_at_start: bool = True, **kwargs) -> Tuple[StepResult, ...]:
         """
         Similar to step, but will attempt all possible transitions on the specified PE,
         including those after branching.
@@ -790,7 +790,7 @@ class Configuration:
         """
 
         final_results = []
-        results: List[NextConfiguration] = list(self.step(pe_id))
+        results: List[NextConfiguration] = list(self.step(pe_id, **kwargs))
 
         while len(results) != 0:
             result = results.pop(0)
@@ -836,7 +836,7 @@ class Configuration:
                 return False
         return True
 
-    def step(self, pe_id: int) -> Tuple[StepResult, ...]:
+    def step(self, pe_id: int, base_pointer_mapping: Optional[Mapping[str, str]] = None) -> Tuple[StepResult, ...]:
         """
         Execute the `pe_index`th PE in the dataflow graph for at most one transition
         Returns () if no transition is possible,
@@ -882,16 +882,25 @@ class Configuration:
         if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
             base_pointers = permission.PermissionSolver.find_function_argument_producers(self.graph, pe_info.inputs[0].id)
 
+            unique_base_pointers = []
+
+            # Some pointers not marked with restrict keyword needs to be put together
+            for base_pointer in base_pointers:
+                if base_pointer_mapping is not None:
+                    base_pointer = base_pointer_mapping[base_pointer]
+                if base_pointer not in unique_base_pointers:
+                    unique_base_pointers.append(base_pointer)
+
             if len(base_pointers) != 0:
                 if isinstance(operator_state, LoadOperator):
                     mem_permission = permission.DisjointUnion.of(*(
                         permission.Read(base_pointer)
-                        for base_pointer in base_pointers
+                        for base_pointer in unique_base_pointers
                     ))
                 else:
                     mem_permission = permission.DisjointUnion.of(*(
                         permission.Write(base_pointer)
-                        for base_pointer in base_pointers
+                        for base_pointer in unique_base_pointers
                     ))
 
                 self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
@@ -957,7 +966,7 @@ class Configuration:
 
             return NextConfiguration(self),
 
-    def step_until_branch(self, pe_ids: Iterable[int], exhaust: bool = True, stop_at_start: bool = True) -> Tuple[StepResult, ...]:
+    def step_until_branch(self, pe_ids: Iterable[int], exhaust: bool = True, **kwargs) -> Tuple[StepResult, ...]:
         """
         Run the specified PEs in sequence and return immediately if branching happens.
         If all given PEs are not fireable, return ()
@@ -967,7 +976,7 @@ class Configuration:
         updated = False
 
         for pe_id in pe_ids:
-            results = self.step_exhaust(pe_id, stop_at_start) if exhaust else self.step(pe_id)
+            results = self.step_exhaust(pe_id, **kwargs) if exhaust else self.step(pe_id)
 
             if len(results) == 1:
                 assert isinstance(results[0], NextConfiguration)

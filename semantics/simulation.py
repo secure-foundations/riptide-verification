@@ -254,6 +254,25 @@ class SimulationChecker:
         self.final_dataflow_branches: Tuple[List[DataflowBranch], ...] = tuple([] for _ in range(self.num_cut_points))
         self.final_llvm_branches: Tuple[List[LLVMBranch], ...] = tuple([] for _ in range(self.num_cut_points))
 
+        self.base_pointer_mapping: Dict[str, str] = {}
+        self.heap_objects: List[str] = []
+
+        # Find the set of heap obejcts
+        has_aliasing = False
+        for parameter in self.llvm_function.parameters.values():
+            if not isinstance(parameter.get_type(), llvm.PointerType):
+                continue
+
+            if parameter.is_noalias():
+                self.heap_objects.append(parameter.name)
+                self.base_pointer_mapping[parameter.name[1:]] = parameter.name
+            else:
+                # Could alias with each other, so we gather them all into other_mem
+                if not has_aliasing:
+                    has_aliasing = True
+                    self.heap_objects.append("other_mem")
+                self.base_pointer_mapping[parameter.name[1:]] = "other_mem"
+
         self.permission_var_counter = 0
 
     def get_fresh_permission_var(self, prefix: str) -> dataflow.permission.Variable:
@@ -376,7 +395,7 @@ class SimulationChecker:
                 changed = False
 
                 # Run steer/inv gates until stuck
-                results = config.step_until_branch(self.steer_inv_pe_ids)
+                results = config.step_until_branch(self.steer_inv_pe_ids, base_pointer_mapping=self.base_pointer_mapping)
                 if len(results) == 1:
                     changed = True
                     config = results[0].config
@@ -391,6 +410,7 @@ class SimulationChecker:
                         if config.operator_states[pe_id].current_transition == dataflow.CarryOperator.loop
                     ),
                     exhaust=False,
+                    base_pointer_mapping=self.base_pointer_mapping,
                 )
                 if len(results) == 1:
                     changed = True
@@ -406,6 +426,7 @@ class SimulationChecker:
                         if config.operator_states[pe_id].current_transition == dataflow.MergeOperator.start
                     ),
                     exhaust=False,
+                    base_pointer_mapping=self.base_pointer_mapping,
                 )
                 if len(results) == 1:
                     changed = True
@@ -462,7 +483,7 @@ class SimulationChecker:
                 scheduled_pe_ids = self.find_nested_merges(pe.id)
 
             # print("executing", scheduled_pe_ids)
-            results = config.step_until_branch(scheduled_pe_ids)
+            results = config.step_until_branch(scheduled_pe_ids, base_pointer_mapping=self.base_pointer_mapping)
             if len(results) == 1:
                 config = results[0].config
             elif len(results) > 1:
@@ -729,38 +750,19 @@ class SimulationChecker:
                     for constraint in permission_constraints:
                         constraint_to_branch_indices[id(constraint)] = j, None, None, None
 
-        # Find all heap objects, and coalesce ones that could alias
-        heap_object = []
-        heap_object_substitution = {}
-        has_aliasing = False
-        for parameter in self.llvm_function.parameters.values():
-            if not isinstance(parameter.get_type(), llvm.PointerType):
-                heap_object_substitution[parameter.name[1:]] = None
-                continue
+        # for i, constraint in enumerate(constraints):
+        #     constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
+        #     constraint_to_branch_indices[id(constraints[i])] = constraint_to_branch_indices[id(constraint)]
 
-            if parameter.is_noalias():
-                heap_object.append(parameter.name)
-                heap_object_substitution[parameter.name[1:]] = parameter.name
-            else:
-                # Could alias with each other, so we gather them all into other_mem
-                has_aliasing = True
-                heap_object_substitution[parameter.name[1:]] = "other_mem"
-
-        if has_aliasing:
-            heap_object.append("other_mem")
-
-        for i, constraint in enumerate(constraints):
-            constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
-            constraint_to_branch_indices[id(constraints[i])] = constraint_to_branch_indices[id(constraint)]
-
-        logger.debug(f"heap objects: {heap_object}")
+        logger.debug(f"base pointer mapping: {self.base_pointer_mapping}")
+        logger.debug(f"heap objects: {self.heap_objects}")
         logger.debug(f"checking sat of {len(constraints)} memory permission constraints")
 
         # for constraint in constraints:
         #     print(constraint)
 
         result = dataflow.permission.PermissionSolver.solve_constraints(
-            tuple(heap_object),
+            tuple(self.heap_objects),
             constraints,
             unsat_core=self.permission_unsat_core,
         )

@@ -2,15 +2,8 @@
 #include "stddef.h"
 #include "limits.h"
 
-void nn_vadd(int * weight, int * src, int * dest,
-	int size) {
-
-	int * src_ptr = src;
-	int * weight_ptr = weight;
-	int * dest_ptr = dest;
-
+void nn_vadd(int * restrict weight, int * restrict src, int * restrict dest, int size) {
 	for(int i = 0; i < size; i++) {
-		*dest_ptr++ = *src_ptr++ + *weight_ptr++;
+		dest[i] = src[i] + weight[i];
 	}
-
 }

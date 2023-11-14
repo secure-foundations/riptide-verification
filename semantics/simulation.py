@@ -96,7 +96,6 @@ class DataflowBranch:
     llvm_branch: LLVMBranch # corresponding llvm branch
     permission_equalities: Optional[Tuple[dataflow.permission.Equality, ...]] # None for final configuration
     source_expansion_index: Optional[int] = None
-    target_expansion_indices: Optional[Tuple[int, ...]] = None
 
 
 @dataclass
@@ -520,17 +519,17 @@ class SimulationChecker:
         expansion_index_to_branch: List[List[DataflowBranch]] = [ [] for j in range(self.num_cut_points) ]
 
         if self.cut_point_expansion:
-            for i in range(self.num_cut_points):
-                expansion_size.append(max(1, sum(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
-
             # Mark each branch from each cut point with a unique source expansion index
             for j in range(self.num_cut_points):
+                num_non_final_branches = sum(len(self.matched_dataflow_branches[i][j]) for i in range(self.num_cut_points))
+                num_final_branches = len(self.final_dataflow_branches[j])
+
+                assert num_non_final_branches + num_final_branches >= 1
+                expansion_size.append(num_non_final_branches + num_final_branches)
+
                 for i in range(self.num_cut_points):
                     for dataflow_branch in self.matched_dataflow_branches[i][j]:
                         dataflow_branch.source_expansion_index = len(expansion_index_to_branch[j])
-                        # We could reduce the size of this by checking if it is feasible for the
-                        # branch condition to reach some of the expanded cut points
-                        dataflow_branch.target_expansion_indices = tuple(range(expansion_size[i]))
                         expansion_index_to_branch[j].append(dataflow_branch)
 
                 for dataflow_branch in self.final_dataflow_branches[j]:
@@ -553,7 +552,23 @@ class SimulationChecker:
 
                         source_expansion_index = dataflow_branch.source_expansion_index
 
-                        for target_expansion_index in dataflow_branch.target_expansion_indices:
+                        for target_expansion_index in range(expansion_size[i]):
+                            # Check if this branch into the expanded cut point is feasible
+                            # dataflow_branch.config.path_conditions
+                            # dataflow_branch.match_result
+                            # expansion_index_to_branch[i][target_expansion_index].config.path_conditions
+                            if not smt.check_sat([
+                                *dataflow_branch.config.path_conditions,
+                                *(
+                                    target_path_condition.substitute(dataflow_branch.match_result.substitution)
+                                    for target_path_condition in expansion_index_to_branch[i][target_expansion_index].config.path_conditions
+                                ),
+                            ]):
+                                logger.debug(f"pruned a branch from {j}@{source_expansion_index} to {i}@{target_expansion_index}")
+                                continue
+
+                            logger.debug(f"adding confluence constraints for a branch from {j}@{source_expansion_index} to {i}@{target_expansion_index}")
+
                             substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
 
                             # For each branch, the permission constraints + equality constraints contain 3 kinds of variables
@@ -596,6 +611,7 @@ class SimulationChecker:
                             constraints.extend(substituted_equality_constraint.formulas)
 
                     else:
+                        logger.debug(f"adding confluence constraints for a branch from {j} to {i}")
                         permission_constraints = tuple(dataflow_branch.config.permission_constraints)
                         equality_constraints = tuple(dataflow_branch.permission_equalities)
                         constraints.extend(self.refresh_exec_permission_vars(permission_constraints + equality_constraints))
@@ -606,6 +622,8 @@ class SimulationChecker:
 
                     source_expansion_index = dataflow_branch.source_expansion_index
                     substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
+
+                    logger.debug(f"adding confluence constraints for a branch from {j}@{source_expansion_index} to ⊥")
 
                     for free_var in permission_constraint.get_free_variables():
                         if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{j}"):
@@ -620,6 +638,7 @@ class SimulationChecker:
                     substituted_permission_constraint = permission_constraint.substitute(substitution)
                     constraints.extend(substituted_permission_constraint.formulas)
                 else:
+                    logger.debug(f"adding confluence constraints for a branch from {j} to ⊥")
                     constraints.extend(self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints))
 
         # Find all heap objects, and coalesce ones that could alias

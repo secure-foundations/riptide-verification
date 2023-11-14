@@ -24,9 +24,10 @@ PERMISSION_PREFIX_CHANNEL = "channel-"
 @dataclass
 class LoopHeaderHint:
     block_name: str
-    prev_block: str
+    incoming_block: str
+    back_edge_block: str
     # live_vars: Tuple[str, ...] # live variables (excluding parameters)
-    lcssa_vars: Tuple[Tuple[str, str], ...] # pairs of (original var, lcssa var)
+    # lcssa_vars: Tuple[Tuple[str, str], ...] # pairs of (original var, lcssa var)
 
 
 @dataclass
@@ -43,7 +44,7 @@ class DataflowBranch:
     config: dataflow.Configuration
     match_result: Optional[MatchingSuccess] # None for final configuration
     llvm_branch: LLVMBranch # corresponding llvm branch
-    permission_equalities: Optional[Tuple[dataflow.permission.Formula, ...]] # None for final configuration
+    permission_equalities: Optional[Tuple[dataflow.permission.Equality, ...]] # None for final configuration
 
 
 @dataclass
@@ -109,9 +110,11 @@ class SimulationChecker:
         llvm_function: llvm.Function,
         loop_header_hints: Iterable[LoopHeaderHint],
         permission_unsat_core: bool = False,
+        cut_point_expansion: bool = True,
     ):
         self.solver = smt.Solver(name="z3", random_seed=0)
         self.permission_unsat_core = permission_unsat_core
+        self.cut_point_expansion = cut_point_expansion
 
         self.dataflow_graph = dataflow_graph
         self.llvm_function = llvm_function
@@ -182,14 +185,17 @@ class SimulationChecker:
 
         # For each loop header, generate LLVM cut point and a placeholder for dataflow cut point
         for header_info in loop_header_hints:
-            self.dataflow_cut_points.append(None)
+            # llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
+            # llvm_cut_point.current_block = header_info.block_name
+            # llvm_cut_point.previous_block = header_info.incoming_block
+            # self.dataflow_cut_points.append(None)
+            # self.llvm_cut_points.append(llvm_cut_point)
+            # self.correspondence.append(None)
+
             llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function, self.solver)
             llvm_cut_point.current_block = header_info.block_name
-            llvm_cut_point.previous_block = header_info.prev_block
-
-            for original_var_name, lcssa_var_name in header_info.lcssa_vars:
-                llvm_cut_point.set_variable(original_var_name, llvm_cut_point.get_variable(lcssa_var_name))
-
+            llvm_cut_point.previous_block = header_info.back_edge_block
+            self.dataflow_cut_points.append(None)
             self.llvm_cut_points.append(llvm_cut_point)
             self.correspondence.append(None)
 
@@ -400,6 +406,7 @@ class SimulationChecker:
                 # Check for nested merges
                 scheduled_pe_ids = self.find_nested_merges(pe.id)
 
+            # print("executing", scheduled_pe_ids)
             results = config.step_until_branch(scheduled_pe_ids)
             if len(results) == 1:
                 config = results[0].config
@@ -456,7 +463,7 @@ class SimulationChecker:
         for free_var in sorted(tuple(free_vars), key=lambda v: v.name):
             if not free_var.name.startswith(PERMISSION_PREFIX_CUT_POINT):
                 assert free_var.name.startswith(dataflow.PERMISSION_PREFIX_EXEC), f"unexpected free var {free_var.name}"
-                prefix = "-".join(free_var.name.split("-")[:-1])
+                prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
                 substitution[free_var] = self.get_fresh_permission_var(prefix)
 
         return tuple(constraint.substitute(substitution) for constraint in constraints)
@@ -466,18 +473,99 @@ class SimulationChecker:
         Check the satifiability of the conjunction of all memory permission constraints
         """
 
+        # cut point index |-> expansion size
+        expansion_size: List[int] = []
+
+        if self.cut_point_expansion:
+            for i in range(self.num_cut_points):
+                expansion_size.append(max(1, max(len(self.matched_dataflow_branches[i][j]) for j in range(self.num_cut_points))))
+
+            logger.debug(f"using cut point expansion sizes {expansion_size}")
+        else:
+            logger.debug("cut point expansion disabled")
+
         constraints: List[dataflow.permission.Formula] = []
 
         for j in range(self.num_cut_points):
             for i in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
-                    permission_constraints = tuple(dataflow_branch.config.permission_constraints)
-                    equality_constraints = tuple(dataflow_branch.permission_equalities)
-                    constraints.extend(self.refresh_exec_permission_vars(permission_constraints + equality_constraints))
+                    if self.cut_point_expansion:
+                        # Expand one cut point to expansion_size[j] many cut points
+                        # Allow permission tokens to be assigned more freely
+                        permission_constraint = dataflow.permission.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+
+                        for source_expansion_index in range(expansion_size[j]):
+                            substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
+
+                            # For each branch, the permission constraints + equality constraints contain 3 kinds of variables
+                            # 1. cut point vars from the source cut point (may be in both)
+                            # 2. cut point vars from the target cut point (only in equality constraints)
+                            # 3. exec vars from intermediate steps (may be in both)
+
+                            # Rename source cut point vars and refresh exec vars
+                            for free_var in permission_constraint.get_free_variables():
+                                if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{j}"):
+                                    # need consistent renaming here
+                                    substitution[free_var] = dataflow.permission.Variable(f"expansion-{source_expansion_index}-" + free_var.name)
+                                else:
+                                    # refresh other variables
+                                    assert not free_var.name.startswith(PERMISSION_PREFIX_CUT_POINT), f"unexpected free var {free_var.name} from cut point {j} to {i}"
+                                    prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
+                                    substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+                            substituted_permission_constraint = permission_constraint.substitute(substitution)
+
+                            # Only substitute RHS first (these are variables coming from the source cut point)
+                            substituted_equality_constraint = dataflow.permission.Conjunction(
+                                tuple(
+                                    dataflow.permission.Equality(equality.left, equality.right.substitute(substitution))
+                                    for equality in dataflow_branch.permission_equalities
+                                )
+                            )
+
+                            # state that the equality should only need to work for one of the expanded cut point
+                            # print(substituted_equality_constraint)
+                            disjuncts = []
+                            for target_expansion_index in range(expansion_size[i]):
+                                substitution = {}
+                                for free_var in self.dataflow_cut_points[i].get_free_permission_vars():
+                                    assert free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{i}")
+                                    substitution[free_var] = dataflow.permission.Variable(f"expansion-{target_expansion_index}-" + free_var.name)
+                                disjuncts.append(substituted_equality_constraint.substitute(substitution))
+
+                            substituted_equality_constraint = dataflow.permission.Disjunction(tuple(disjuncts))
+                            # print(substituted_equality_constraint)
+
+                            constraints.extend(substituted_permission_constraint.formulas)
+                            constraints.append(substituted_equality_constraint)
+
+                    else:
+                        permission_constraints = tuple(dataflow_branch.config.permission_constraints)
+                        equality_constraints = tuple(dataflow_branch.permission_equalities)
+                        constraints.extend(self.refresh_exec_permission_vars(permission_constraints + equality_constraints))
 
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
-                constraints.extend(self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints))
+                if self.cut_point_expansion:
+                    permission_constraint = dataflow.permission.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+
+                    for source_expansion_index in range(expansion_size[i]):
+                        substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
+
+                        for free_var in permission_constraint.get_free_variables():
+                            if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{i}"):
+                                # need consistent renaming here
+                                substitution[free_var] = dataflow.permission.Variable(f"expansion-{source_expansion_index}-" + free_var.name)
+                            else:
+                                # refresh other variables
+                                assert not free_var.name.startswith(PERMISSION_PREFIX_CUT_POINT)
+                                prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
+                                substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+                        substituted_permission_constraint = permission_constraint.substitute(substitution)
+                        constraints.extend(substituted_permission_constraint.formulas)
+                else:
+                    constraints.extend(self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints))
 
         # Find all heap objects, and coalesce ones that could alias
         heap_object = []
@@ -585,7 +673,7 @@ class SimulationChecker:
         # Check that final configs actually terminates
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
-                logger.debug(f"[dataflow] checking a final branch from {i} is not fireable")
+                logger.debug(f"[dataflow] checking that a final branch from {i} is not fireable")
 
                 for pe in self.dataflow_graph.vertices:
                     if dataflow_branch.config.is_fireable(pe.id):
@@ -744,6 +832,9 @@ class SimulationChecker:
                 else:
                     assert isinstance(producer, dataflow.ConstantValue)
                     channel_value = smt.BVConst(producer.value, dataflow.WORD_WIDTH)
+
+                if cut_point.channel_states[channel_id].ready():
+                    cut_point.channel_states[channel_id].pop()
 
                 perm = self.get_fresh_permission_var(f"{permission_prefix}{PERMISSION_PREFIX_CHANNEL}{channel_id}-")
                 cut_point.channel_states[channel_id].push(dataflow.PermissionedValue(channel_value, perm))

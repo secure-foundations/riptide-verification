@@ -137,6 +137,9 @@ class Formula:
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         raise NotImplementedError()
 
+    def is_atomic(self) -> bool:
+        raise NotImplementedError()
+
 
 @dataclass
 class Equality(Formula):
@@ -154,6 +157,9 @@ class Equality(Formula):
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Equality(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
+
+    def is_atomic(self) -> bool:
+        return True
 
 
 @dataclass
@@ -176,6 +182,9 @@ class Inclusion(Formula):
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Inclusion(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
+    def is_atomic(self) -> bool:
+        return True
+
 
 @dataclass
 class Disjoint(Formula):
@@ -196,13 +205,16 @@ class Disjoint(Formula):
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Disjoint(tuple(term.substitute_heap_object(substitution) for term in self.terms))
 
+    def is_atomic(self) -> bool:
+        return True
+
 
 @dataclass
 class Conjunction(Formula):
     formulas: Tuple[Formula, ...]
 
     def __str__(self):
-        return {" /\\ ".join(map(str, self.terms))}
+        return " /\\ ".join(map(lambda f: str(f) if f.is_atomic() else f"({f})", self.formulas))
 
     def get_free_variables(self) -> Set[Variable]:
         return set().union(*(formula.get_free_variables() for formula in self.formulas))
@@ -213,13 +225,16 @@ class Conjunction(Formula):
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Conjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
 
+    def is_atomic(self) -> bool:
+        return False
+
 
 @dataclass
 class Disjunction(Formula):
     formulas: Tuple[Formula, ...]
 
     def __str__(self):
-        return {" \\/ ".join(map(str, self.terms))}
+        return " \\/ ".join(map(lambda f: str(f) if f.is_atomic() else f"({f})", self.formulas))
 
     def get_free_variables(self) -> Set[Variable]:
         return set().union(*(formula.get_free_variables() for formula in self.formulas))
@@ -229,6 +244,9 @@ class Disjunction(Formula):
 
     def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         return Disjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
+
+    def is_atomic(self) -> bool:
+        return False
 
 
 class RWPermissionPCM:
@@ -529,8 +547,44 @@ class PermissionSolver:
             else:
                 if debug_unsat_core:
                     unsat_core = tuple(solver.get_unsat_core())
+
+                    disjoint_constraints = []
+                    equality_constraints = []
+                    linearity_constraints = []
+                    rw_constraints = []
+                    other_constraints = []
+
                     for unsat_core_formula in unsat_core:
-                        print(formula_to_constraint[unsat_core_formula])
+                        constraint = formula_to_constraint[unsat_core_formula]
+
+                        if isinstance(constraint, Disjoint):
+                            disjoint_constraints.append(constraint)
+
+                        elif isinstance(constraint, Equality):
+                            equality_constraints.append(constraint)
+
+                        elif isinstance(constraint, Inclusion):
+                            if isinstance(constraint.left, Read) or \
+                               isinstance(constraint.left, Write) or \
+                               (isinstance(constraint.left, DisjointUnion) and \
+                                len(constraint.left.terms) == 1 and \
+                                (isinstance(constraint.left.terms[0], Read) or \
+                                 isinstance(constraint.left.terms[0], Write))):
+                                rw_constraints.append(constraint)
+                            else:
+                                linearity_constraints.append(constraint)
+
+                        else:
+                            other_constraints.append(constraint)
+
+                    print("\n\n".join([
+                        "# disjoints\n" + "\n".join(map(str, disjoint_constraints)),
+                        "# equalities\n" + "\n".join(map(str, equality_constraints)),
+                        "# linearity\n" + "\n".join(map(str, linearity_constraints)),
+                        "# rw\n" + "\n".join(map(str, rw_constraints)),
+                        "# others\n" + "\n".join(map(str, other_constraints)),
+                    ]))
+
                     print("unsat core size:", len(unsat_core))
                 return None
 

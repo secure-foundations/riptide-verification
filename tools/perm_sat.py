@@ -24,6 +24,22 @@ class ASTTransformer(Transformer):
     def formula(self, args: List[permission.Formula]) -> permission.Formula:
         return args[0]
 
+    def disjunctive_formula(self, args: List[permission.Formula]) -> permission.Disjunction:
+        if len(args) == 1:
+            return args[0]
+        return permission.Disjunction(tuple(args))
+
+    def conjunctive_formula(self, args: List[permission.Formula]) -> permission.Conjunction:
+        if len(args) == 1:
+            return args[0]
+        return permission.Conjunction(tuple(args))
+
+    def atomic_formula(self, args: List[permission.Formula]) -> permission.Formula:
+        return args[0]
+
+    def parentheses_formula(self, args: List[permission.Formula]) -> permission.Formula:
+        return args[0]
+
     def inclusion(self, args: List[permission.Term]) -> permission.Inclusion:
         return permission.Inclusion(args[0], args[1])
 
@@ -53,6 +69,9 @@ class ASTTransformer(Transformer):
         self.heap_objects[str(args[0])] = None
         return permission.Write(str(args[0]))
 
+    def parentheses_term(self, args: List[permission.Term]) -> permission.Term:
+        return args[0]
+
 
 SYNTAX = r"""
     INLINE_COMMENT: /\#[^\n]*/
@@ -64,9 +83,18 @@ SYNTAX = r"""
 
     formulas: formula*
 
-    formula: inclusion
-           | equality
-           | disjoint
+    formula: disjunctive_formula
+
+    disjunctive_formula: conjunctive_formula ("\\/" conjunctive_formula)*
+                       | conjunctive_formula ("or" conjunctive_formula)*
+
+    conjunctive_formula: atomic_formula ("/\\" atomic_formula)*
+                       | atomic_formula ("and" atomic_formula)*
+
+    atomic_formula: inclusion
+                  | equality
+                  | disjoint
+                  | "(" formula ")" -> parentheses_formula
 
     inclusion: term "<=" term | term "⊑" term
 
@@ -80,6 +108,7 @@ SYNTAX = r"""
     atomic_term: "p" "(" PERMISSION_NAME ")" -> variable
                | "read" HEAP_OBJECT -> read
                | "write" HEAP_OBJECT -> write
+               | "(" term ")" -> parentheses_term
 """
 
 

@@ -18,7 +18,7 @@ from utils import logging
 logger = logging.getLogger(__name__)
 
 
-def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = None, permission_unsat_core: bool = False):
+def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = None, permission_unsat_core: bool = False, cut_point_expansion: bool = False):
     """
     If function_name is not set, we assume the LLVM module only has one defined function
     """
@@ -27,7 +27,7 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
         dataflow_graph_json = json.load(dataflow_source)
         dataflow_graph = dataflow.DataflowGraph.load_dataflow_graph(dataflow_graph_json)
         loop_header_hints = [
-            LoopHeaderHint(loop["header"], loop["back_edge"], ())
+            LoopHeaderHint(loop["header"], loop["incoming"], loop["back_edge"])
             for loop in dataflow_graph_json["function"]["loops"]
         ]
 
@@ -42,7 +42,13 @@ def run_bisim(o2p_path: str, lso_ll_path: str, function_name: Optional[str] = No
         else:
             llvm_function = llvm_module.functions[function_name]
 
-    sim_checker = SimulationChecker(dataflow_graph, llvm_function, loop_header_hints, permission_unsat_core=permission_unsat_core)
+    sim_checker = SimulationChecker(
+        dataflow_graph,
+        llvm_function,
+        loop_header_hints,
+        permission_unsat_core=permission_unsat_core,
+        cut_point_expansion=cut_point_expansion,
+    )
     sim_checker.run_all_checks()
 
 
@@ -52,11 +58,12 @@ def main():
     parser.add_argument("lso_ll", help="LLVM code after lso")
     parser.add_argument("--function", help="Specify a function name to check")
     parser.add_argument("--permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed")
+    parser.add_argument("--cut-point-expansion", action="store_const", const=True, default=False, help="Enable cut point expansion for confluence checking")
     logging.add_arguments(parser)
     args = parser.parse_args()
     logging.basic_config(args)
 
-    run_bisim(args.o2p, args.lso_ll, args.function, args.permission_unsat_core)
+    run_bisim(args.o2p, args.lso_ll, args.function, args.permission_unsat_core, args.cut_point_expansion)
 
 
 if __name__ == "__main__":

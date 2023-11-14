@@ -499,7 +499,7 @@ class Configuration:
 
     solver: Optional[smt.Solver] = None
 
-    def match(self, other: Configuration) -> Tuple[MatchingResult, Optional[Tuple[permission.Formula, ...]]]:
+    def match(self, other: Configuration) -> Tuple[MatchingResult, Optional[Tuple[permission.Equality, ...]]]:
         """
         Treat self as a pattern and match other against self
 
@@ -509,6 +509,7 @@ class Configuration:
         - memory_updates is empty
 
         An additional list of permission equality is returned
+        (and it will always be the case that for any equality left = right, left occurs in self and right occurs in other)
         """
 
         assert self.graph == other.graph
@@ -517,7 +518,7 @@ class Configuration:
 
         result = MatchingSuccess()
 
-        permission_equalities: List[permission.Formula] = []
+        permission_equalities: List[permission.Equality] = []
 
         # Match operator states
         assert len(self.operator_states) == len(other.operator_states)

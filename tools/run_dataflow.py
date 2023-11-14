@@ -7,7 +7,7 @@ import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
 from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH
-from semantics.dataflow.permission import PermissionSolver
+from semantics.dataflow.permission import PermissionSolver, ResultSat, ResultUnsat
 
 
 def main():
@@ -83,10 +83,10 @@ def main():
 
             # Check memory permission constraints
             print(f"  {len(config.permission_constraints)} permission constraint(s)")
-            solution = PermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
+            result = PermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
             # for constraint in config.permission_constraints:
             #     print(f"  {constraint}")
-            if solution is None:
+            if isinstance(result, ResultUnsat):
                 print("unable to find consistent permission assignment, potential data race")
                 break
 

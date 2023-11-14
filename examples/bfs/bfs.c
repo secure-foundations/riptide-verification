@@ -4,7 +4,7 @@ void bfs(
 	int count,
 	int * queue,
 	int * visited,
-	int * walk
+	int * restrict walk
 )
 {
 

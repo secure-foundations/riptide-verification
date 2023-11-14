@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 PERMISSION_PREFIX_CUT_POINT = "cut-point-"
 PERMISSION_PREFIX_CHANNEL = "channel-"
+PERMISSION_PREFIX_EXPANSION = "expansion-"
 
 
 @dataclass
@@ -50,10 +51,23 @@ class BackEdgeOnly(CutPointPlacement):
         cut_points = []
 
         for header_info in self.loop_header_hints:
+            # if header_info.block_name == "for.cond2":
+            #     continue
+
             llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
             llvm_cut_point.current_block = header_info.block_name
             llvm_cut_point.previous_block = header_info.back_edge_block
             cut_points.append(llvm_cut_point)
+
+        # llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+        # llvm_cut_point.current_block = "if.then"
+        # llvm_cut_point.previous_block = "for.body6"
+        # cut_points.append(llvm_cut_point)
+
+        # llvm_cut_point = llvm.Configuration.get_initial_configuration(self.llvm_function.module, self.llvm_function)
+        # llvm_cut_point.current_block = "for.inc"
+        # llvm_cut_point.previous_block = "for.body6"
+        # cut_points.append(llvm_cut_point)
 
         return tuple(cut_points)
 
@@ -509,6 +523,120 @@ class SimulationChecker:
 
         return tuple(constraint.substitute(substitution) for constraint in constraints)
 
+    def replace_source_expansion_permission_vars(self, branch: DataflowBranch, target_expansion_index: Optional[int]) -> Tuple[dataflow.permission.Formula, ...]:
+        """
+        Prepend original cut point variables with the source_expansion_index prefix
+        and also refresh all exec- variables
+
+        Prepend target cut point match variables with target_expansion_index prefix
+        (if specified)
+        """
+
+        # Make a conjunction to simplify substitution
+        permission_constraint = dataflow.permission.Conjunction(tuple(branch.config.permission_constraints))
+
+        source_index = branch.llvm_branch.from_cut_point
+        target_index = branch.llvm_branch.to_cut_point
+
+        rhs_substitution = {}
+
+        # Rename source cut point vars and refresh exec vars
+        for free_var in permission_constraint.get_free_variables():
+            if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{source_index}"):
+                # need consistent renaming here
+                rhs_substitution[free_var] = dataflow.permission.Variable(f"{PERMISSION_PREFIX_EXPANSION}{branch.source_expansion_index}-" + free_var.name)
+            else:
+                # refresh other variables
+                assert free_var.name.startswith(dataflow.PERMISSION_PREFIX_EXEC), \
+                       f"unexpected free var {free_var.name} from cut point {source_index} to {target_index or '⊥'}"
+                prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
+                rhs_substitution[free_var] = self.get_fresh_permission_var(prefix)
+
+        substituted_permission_constraints = permission_constraint.substitute(rhs_substitution).formulas
+
+        # Add equality constraints
+        if target_expansion_index is not None:
+            assert target_index is not None
+            # Create the constraints to match with one of the target_expansion_index
+            # print(substituted_equality_constraint)
+            lhs_substitution = {}
+            for free_var in self.dataflow_cut_points[target_index].get_free_permission_vars():
+                assert free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{target_index}")
+                lhs_substitution[free_var] = dataflow.permission.Variable(f"{PERMISSION_PREFIX_EXPANSION}{target_expansion_index}-" + free_var.name)
+
+            substituted_permission_constraints += tuple(
+                dataflow.permission.Equality(equality.left.substitute(lhs_substitution), equality.right.substitute(rhs_substitution))
+                for equality in branch.permission_equalities
+            )
+
+        else:
+            assert branch.permission_equalities is None
+
+        return substituted_permission_constraints
+
+    def analyze_permission_unsat_core(
+        self,
+        unsat_core: Tuple[dataflow.permission.Formula, ...],
+        constraint_to_branch_indices: Dict[int, Tuple[int, Optional[int], Optional[int], Optional[int]]],
+    ):
+        """
+        Analyze the unsat core and output debug information
+        """
+
+        branch_indices_to_constraints: Dict[Tuple[int, Optional[int], Optional[int], Optional[int]], List[dataflow.permission.Formula]] = {}
+
+        for constraint in unsat_core:
+            branch_indices = constraint_to_branch_indices[id(constraint)]
+            if branch_indices not in branch_indices_to_constraints:
+                branch_indices_to_constraints[branch_indices] = []
+            branch_indices_to_constraints[branch_indices].append(constraint)
+
+        logger.debug("dumping unsat core")
+
+        for branch_indices, constraints in branch_indices_to_constraints.items():
+
+            if branch_indices[2] is None:
+                print(f"### constrains from {branch_indices[0]}@{branch_indices[1]} to ⊥")
+            else:
+                print(f"### constrains from {branch_indices[0]}@{branch_indices[1]} to {branch_indices[2]}@{branch_indices[3]}")
+
+            disjoint_constraints = []
+            equality_constraints = []
+            linearity_constraints = []
+            rw_constraints = []
+            other_constraints = []
+
+            for constraint in constraints:
+                if isinstance(constraint, dataflow.permission.Disjoint):
+                    disjoint_constraints.append(constraint)
+
+                elif isinstance(constraint, dataflow.permission.Equality):
+                    equality_constraints.append(constraint)
+
+                elif isinstance(constraint, dataflow.permission.Inclusion):
+                    if isinstance(constraint.left, dataflow.permission.Read) or \
+                       isinstance(constraint.left, dataflow.permission.Write) or \
+                       (isinstance(constraint.left, dataflow.permission.DisjointUnion) and \
+                        len(constraint.left.terms) == 1 and \
+                        (isinstance(constraint.left.terms[0], dataflow.permission.Read) or \
+                         isinstance(constraint.left.terms[0], dataflow.permission.Write))):
+                        rw_constraints.append(constraint)
+                    else:
+                        linearity_constraints.append(constraint)
+
+                else:
+                    other_constraints.append(constraint)
+
+            print("\n\n".join([
+                "\n".join(["# disjoints"] + list(map(str, disjoint_constraints))),
+                "\n".join(["# equalities"] + list(map(str, equality_constraints))),
+                "\n".join(["# linearity"] + list(map(str, linearity_constraints))),
+                "\n".join(["# rw"] + list(map(str, rw_constraints))),
+                "\n".join(["# others"] + list(map(str, other_constraints))),
+            ]))
+
+        print("# unsat core size:", len(unsat_core))
+
     def check_confluence(self):
         """
         Check the satifiability of the conjunction of all memory permission constraints
@@ -542,15 +670,15 @@ class SimulationChecker:
 
         constraints: List[dataflow.permission.Formula] = []
 
+        # for debug purpose, indices are (source cut point index, source expansion index, target cut point index, target expansion index)
+        constraint_to_branch_indices: Dict[int, Tuple[int, Optional[int], Optional[int], Optional[int]]] = {}
+
         for j in range(self.num_cut_points):
             for i in range(self.num_cut_points):
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
                     if self.cut_point_expansion:
                         # Expand one cut point to expansion_size[j] many cut points
                         # Allow permission tokens to be assigned more freely
-                        permission_constraint = dataflow.permission.Conjunction(tuple(dataflow_branch.config.permission_constraints))
-
-                        source_expansion_index = dataflow_branch.source_expansion_index
 
                         for target_expansion_index in range(expansion_size[i]):
                             # Check if this branch into the expanded cut point is feasible
@@ -564,82 +692,42 @@ class SimulationChecker:
                                     for target_path_condition in expansion_index_to_branch[i][target_expansion_index].config.path_conditions
                                 ),
                             ]):
-                                logger.debug(f"pruned a branch from {j}@{source_expansion_index} to {i}@{target_expansion_index}")
+                                logger.debug(f"pruned a branch from {j}@{dataflow_branch.source_expansion_index} to {i}@{target_expansion_index}")
                                 continue
 
-                            logger.debug(f"adding confluence constraints for a branch from {j}@{source_expansion_index} to {i}@{target_expansion_index}")
+                            logger.debug(f"adding confluence constraints for a branch from {j}@{dataflow_branch.source_expansion_index} to {i}@{target_expansion_index}")
 
-                            substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
+                            permission_constraints = self.replace_source_expansion_permission_vars(dataflow_branch, target_expansion_index)
+                            constraints.extend(permission_constraints)
 
-                            # For each branch, the permission constraints + equality constraints contain 3 kinds of variables
-                            # 1. cut point vars from the source cut point (may be in both)
-                            # 2. cut point vars from the target cut point (only in equality constraints)
-                            # 3. exec vars from intermediate steps (may be in both)
-
-                            # Rename source cut point vars and refresh exec vars
-                            for free_var in permission_constraint.get_free_variables():
-                                if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{j}"):
-                                    # need consistent renaming here
-                                    substitution[free_var] = dataflow.permission.Variable(f"expansion-{source_expansion_index}-" + free_var.name)
-                                else:
-                                    # refresh other variables
-                                    assert not free_var.name.startswith(PERMISSION_PREFIX_CUT_POINT), f"unexpected free var {free_var.name} from cut point {j} to {i}"
-                                    prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
-                                    substitution[free_var] = self.get_fresh_permission_var(prefix)
-
-                            substituted_permission_constraint = permission_constraint.substitute(substitution)
-
-                            # Only substitute RHS first (these are variables coming from the source cut point)
-                            substituted_equality_constraint = dataflow.permission.Conjunction(
-                                tuple(
-                                    dataflow.permission.Equality(equality.left, equality.right.substitute(substitution))
-                                    for equality in dataflow_branch.permission_equalities
-                                )
-                            )
-
-                            # Create the constraints to match with one of the target_expansion_index
-                            # print(substituted_equality_constraint)
-                            substitution = {}
-                            for free_var in self.dataflow_cut_points[i].get_free_permission_vars():
-                                assert free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{i}")
-                                substitution[free_var] = dataflow.permission.Variable(f"expansion-{target_expansion_index}-" + free_var.name)
-
-                            substituted_equality_constraint = substituted_equality_constraint.substitute(substitution)
-                            # print(substituted_equality_constraint)
-
-                            constraints.extend(substituted_permission_constraint.formulas)
-                            constraints.extend(substituted_equality_constraint.formulas)
+                            for constraint in permission_constraints:
+                                constraint_to_branch_indices[id(constraint)] = j, dataflow_branch.source_expansion_index, i, target_expansion_index
 
                     else:
                         logger.debug(f"adding confluence constraints for a branch from {j} to {i}")
-                        permission_constraints = tuple(dataflow_branch.config.permission_constraints)
-                        equality_constraints = tuple(dataflow_branch.permission_equalities)
-                        constraints.extend(self.refresh_exec_permission_vars(permission_constraints + equality_constraints))
+                        permission_constraints = tuple(dataflow_branch.config.permission_constraints) + tuple(dataflow_branch.permission_equalities)
+                        permission_constraints = self.refresh_exec_permission_vars(permission_constraints)
+                        constraints.extend(permission_constraints)
+
+                        for constraint in permission_constraints:
+                            constraint_to_branch_indices[id(constraint)] = j, None, i, None
 
             for dataflow_branch in self.final_dataflow_branches[j]:
                 if self.cut_point_expansion:
-                    permission_constraint = dataflow.permission.Conjunction(tuple(dataflow_branch.config.permission_constraints))
+                    logger.debug(f"adding confluence constraints for a branch from {j}@{dataflow_branch.source_expansion_index} to ⊥")
+                    permission_constraints = self.replace_source_expansion_permission_vars(dataflow_branch, None)
+                    constraints.extend(permission_constraints)
 
-                    source_expansion_index = dataflow_branch.source_expansion_index
-                    substitution: Dict[dataflow.permission.Variable, dataflow.permission.Variable] = {}
+                    for constraint in permission_constraints:
+                        constraint_to_branch_indices[id(constraint)] = j, dataflow_branch.source_expansion_index, None, None
 
-                    logger.debug(f"adding confluence constraints for a branch from {j}@{source_expansion_index} to ⊥")
-
-                    for free_var in permission_constraint.get_free_variables():
-                        if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{j}"):
-                            # need consistent renaming here
-                            substitution[free_var] = dataflow.permission.Variable(f"expansion-{source_expansion_index}-" + free_var.name)
-                        else:
-                            # refresh other variables
-                            assert not free_var.name.startswith(PERMISSION_PREFIX_CUT_POINT)
-                            prefix = "-".join(free_var.name.split("-")[:-1]) + "-"
-                            substitution[free_var] = self.get_fresh_permission_var(prefix)
-
-                    substituted_permission_constraint = permission_constraint.substitute(substitution)
-                    constraints.extend(substituted_permission_constraint.formulas)
                 else:
                     logger.debug(f"adding confluence constraints for a branch from {j} to ⊥")
-                    constraints.extend(self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints))
+                    permission_constraints = self.refresh_exec_permission_vars(dataflow_branch.config.permission_constraints)
+                    constraints.extend(permission_constraints)
+
+                    for constraint in permission_constraints:
+                        constraint_to_branch_indices[id(constraint)] = j, None, None, None
 
         # Find all heap objects, and coalesce ones that could alias
         heap_object = []
@@ -663,6 +751,7 @@ class SimulationChecker:
 
         for i, constraint in enumerate(constraints):
             constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
+            constraint_to_branch_indices[id(constraints[i])] = constraint_to_branch_indices[id(constraint)]
 
         logger.debug(f"heap objects: {heap_object}")
         logger.debug(f"checking sat of {len(constraints)} memory permission constraints")
@@ -670,14 +759,21 @@ class SimulationChecker:
         # for constraint in constraints:
         #     print(constraint)
 
-        solution = dataflow.permission.PermissionSolver.solve_constraints(
+        result = dataflow.permission.PermissionSolver.solve_constraints(
             tuple(heap_object),
             constraints,
-            debug_unsat_core=self.permission_unsat_core,
+            unsat_core=self.permission_unsat_core,
         )
-        if solution is None:
+        if isinstance(result, dataflow.permission.ResultUnsat):
             logger.warning("unsat - may not be confluent")
+
+            if self.permission_unsat_core:
+                unsat_core = result.unsat_core
+                assert unsat_core is not None
+                self.analyze_permission_unsat_core(unsat_core, constraint_to_branch_indices)
+
         else:
+            assert isinstance(result, dataflow.permission.ResultSat)
             logger.debug("sat - confluent")
 
     def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):

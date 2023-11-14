@@ -454,6 +454,19 @@ class RWPermissionPCM:
         assert False, f"unsupported formula {formula}"
 
 
+class SolverResult: ...
+
+
+@dataclass
+class ResultUnsat(SolverResult):
+    unsat_core: Optional[Tuple[Formula, ...]]
+
+
+@dataclass
+class ResultSat(SolverResult):
+    solution: Dict[Variable, Term]
+
+
 class PermissionSolver:
     @staticmethod
     def find_function_argument_producers(graph: DataflowGraph, channel_id: int) -> Tuple[str, ...]:
@@ -503,7 +516,11 @@ class PermissionSolver:
         return tuple(heap_objects)
 
     @staticmethod
-    def solve_constraints(heap_objects: Tuple[str, ...], constraints: Iterable[Formula], debug_unsat_core: bool = False) -> Optional[Dict[Variable, Term]]:
+    def solve_constraints(
+        heap_objects: Tuple[str, ...],
+        constraints: Iterable[Formula],
+        unsat_core: bool = False, # generate an unsat core if unsat
+    ) -> SolverResult:
         free_vars: Set[Variable] = set()
 
         for constraint in constraints:
@@ -518,75 +535,42 @@ class PermissionSolver:
             assignment_defined = smt.And(assignment_defined, defined)
 
         pcm = RWPermissionPCM(heap_objects)
-        solution: Dict[Variable, Term] = {}
 
         formula_to_constraint: Dict[smt.SMTTerm, Union[str, Formula]] = {}
 
-        with smt.UnsatCoreSolver(name="z3") if debug_unsat_core else smt.Solver(name="z3") as solver:
+        with smt.UnsatCoreSolver(name="z3") if unsat_core else smt.Solver(name="z3") as solver:
             solver.add_assertion(assignment_defined)
 
-            if debug_unsat_core:
+            if unsat_core:
                 formula_to_constraint[assignment_defined] = "(definedness of free variables)"
 
             for constraint in constraints:
                 valid = pcm.interpret_formula(assignment, constraint)
                 solver.add_assertion(valid)
 
-                if debug_unsat_core:
+                if unsat_core:
                     formula_to_constraint[valid] = constraint
 
             if solver.solve():
                 model = solver.get_model()
+                solution = {
+                    var: assignment[var].get_value_from_smt_model(model)
+                    for var in free_vars
+                }
 
-                for var in free_vars:
-                    term = assignment[var].get_value_from_smt_model(model)
-                    solution[var] = term
-
-                return solution
+                return ResultSat(solution)
 
             else:
-                if debug_unsat_core:
-                    unsat_core = tuple(solver.get_unsat_core())
+                if unsat_core:
+                    unsat_core = tuple(
+                        formula_to_constraint[unsat_core_formula]
+                        for unsat_core_formula in solver.get_unsat_core()
+                        if not isinstance(formula_to_constraint[unsat_core_formula], str)
+                    )
+                else:
+                    unsat_core = None
 
-                    disjoint_constraints = []
-                    equality_constraints = []
-                    linearity_constraints = []
-                    rw_constraints = []
-                    other_constraints = []
-
-                    for unsat_core_formula in unsat_core:
-                        constraint = formula_to_constraint[unsat_core_formula]
-
-                        if isinstance(constraint, Disjoint):
-                            disjoint_constraints.append(constraint)
-
-                        elif isinstance(constraint, Equality):
-                            equality_constraints.append(constraint)
-
-                        elif isinstance(constraint, Inclusion):
-                            if isinstance(constraint.left, Read) or \
-                               isinstance(constraint.left, Write) or \
-                               (isinstance(constraint.left, DisjointUnion) and \
-                                len(constraint.left.terms) == 1 and \
-                                (isinstance(constraint.left.terms[0], Read) or \
-                                 isinstance(constraint.left.terms[0], Write))):
-                                rw_constraints.append(constraint)
-                            else:
-                                linearity_constraints.append(constraint)
-
-                        else:
-                            other_constraints.append(constraint)
-
-                    print("\n\n".join([
-                        "# disjoints\n" + "\n".join(map(str, disjoint_constraints)),
-                        "# equalities\n" + "\n".join(map(str, equality_constraints)),
-                        "# linearity\n" + "\n".join(map(str, linearity_constraints)),
-                        "# rw\n" + "\n".join(map(str, rw_constraints)),
-                        "# others\n" + "\n".join(map(str, other_constraints)),
-                    ]))
-
-                    print("unsat core size:", len(unsat_core))
-                return None
+                return ResultUnsat(unsat_core)
 
 
 class GlobalPermissionVarCounter:

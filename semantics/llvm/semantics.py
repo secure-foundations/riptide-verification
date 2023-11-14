@@ -330,6 +330,27 @@ class Configuration:
             else:
                 assert False, f"icmp condition {instr.cond} not implemented"
 
+            # More eager branching
+            # self.current_instr_counter += 1
+            # other = self.copy()
+
+            # self.set_variable(instr.name, smt.BVConst(1, 1))
+            # other.set_variable(instr.name, smt.BVConst(0, 1))
+
+            # self.path_conditions.append(result.simplify())
+            # other.path_conditions.append(smt.Not(result).simplify())
+
+            # if not self.check_feasibility():
+            #     # other.path_conditions implies cond
+            #     other.path_conditions.pop()
+            #     return NextConfiguration(other),
+
+            # if not other.check_feasibility():
+            #     self.path_conditions.pop()
+            #     return NextConfiguration(self),
+
+            # return NextConfiguration(self), NextConfiguration(other)
+
             self.set_variable(instr.name, smt.Ite(result, smt.BVConst(1, 1), smt.BVConst(0, 1)))
             self.current_instr_counter += 1
             return NextConfiguration(self),

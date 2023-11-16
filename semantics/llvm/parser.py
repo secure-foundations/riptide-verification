@@ -42,6 +42,10 @@ class ASTTransformer(Transformer[ASTNode]):
         typ = args[1]
         return AddInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
 
+    def sub_instruction(self, args: List[Any]) -> AddInstruction:
+        typ = args[1]
+        return SubInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
+
     def mul_instruction(self, args: List[Any]) -> MulInstruction:
         typ = args[1]
         return MulInstruction(args[0].name, typ, args[2].attach_type(typ), args[3].attach_type(typ))
@@ -248,6 +252,7 @@ class Parser:
         instruction_with_metadata: instruction ("," METADATA_LABEL+)*
 
         instruction: add_instruction
+                   | sub_instruction
                    | mul_instruction
                    | and_instruction
                    | or_instruction
@@ -269,6 +274,7 @@ class Parser:
                    | ret_instruction
 
         add_instruction: variable "=" "add" ["nuw"] ["nsw"] integer_type value "," value
+        sub_instruction: variable "=" "sub" ["nuw"] ["nsw"] integer_type value "," value
         mul_instruction: variable "=" "mul" ["nuw"] ["nsw"] integer_type value "," value
 
         and_instruction: variable "=" "and" integer_type value "," value

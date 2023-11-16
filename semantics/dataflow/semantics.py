@@ -88,8 +88,13 @@ class EqOperator(Operator):
 @Operator.implement("ARITH_CFG_OP_ADD")
 class AddOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
-        # print("plus", a, b)
         return smt.BVAdd(a, b)
+
+
+@Operator.implement("ARITH_CFG_OP_SUB")
+class AddOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.BVSub(a, b)
 
 
 @Operator.implement("ARITH_CFG_OP_AND")

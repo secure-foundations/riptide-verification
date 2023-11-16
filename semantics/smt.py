@@ -11,7 +11,7 @@ from pysmt.shortcuts import ( # type: ignore
     Array, Select,
     get_free_variables,
     Plus, Store, Times,
-    BVAdd, BVMul, BVZExt, BVSExt, BVExtract, BVConcat, BVSGE, BVSGT, BVSLT, BVUGT, BVULT, BVNeg,
+    BVAdd, BVSub, BVMul, BVZExt, BVSExt, BVExtract, BVConcat, BVSGE, BVSGT, BVSLT, BVUGT, BVULT, BVNeg,
     BVAnd, BVOr, BVXor, BVLShl, BVLShr, BVAShr,
 )
 from pysmt.typing import BOOL, INT, STRING, BVType, FunctionType, ArrayType, Type # type: ignore

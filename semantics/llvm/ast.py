@@ -279,6 +279,30 @@ class AddInstruction(Instruction):
 
 
 @dataclass
+class SubInstruction(Instruction):
+    name: str
+    type: Type
+    left: Value
+    right: Value
+
+    def get_defined_variable(self) -> Optional[str]:
+        return self.name
+
+    def resolve_uses(self, function: Function) -> None:
+        self.left = self.left.resolve_uses(function)
+        self.right = self.right.resolve_uses(function)
+
+    def get_full_string(self) -> str:
+        return f"{self.name} = sub {self.type}, {self.left}, {self.right}"
+
+    def get_type(self) -> Type:
+        return self.type
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+
+@dataclass
 class MulInstruction(Instruction):
     name: str
     type: Type

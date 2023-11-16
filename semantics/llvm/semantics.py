@@ -272,6 +272,7 @@ class Configuration:
 
         binary_op_semantics: Dict[str, Callable[[smt.SMTTerm, smt.SMTTerm], smt.SMTTerm]] = {
             AddInstruction: smt.BVAdd,
+            SubInstruction: smt.BVSub,
             MulInstruction: smt.BVMul,
             AndInstruction: smt.BVAnd,
             OrInstruction: smt.BVOr,

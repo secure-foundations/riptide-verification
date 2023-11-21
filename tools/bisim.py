@@ -22,6 +22,7 @@ def run_bisim(
     o2p_path: str,
     lso_ll_path: str,
     function_name: Optional[str] = None,
+    permission_fractional_reads: int = 4,
     permission_unsat_core: bool = False,
     cut_point_expansion: bool = False,
 ):
@@ -51,6 +52,7 @@ def run_bisim(
         dataflow_graph,
         llvm_function,
         cut_point_placement,
+        permission_fractional_reads=permission_fractional_reads,
         permission_unsat_core=permission_unsat_core,
         cut_point_expansion=cut_point_expansion,
     )
@@ -62,13 +64,14 @@ def main():
     parser.add_argument("o2p", help="Annotated o2p file")
     parser.add_argument("lso_ll", help="LLVM code after lso")
     parser.add_argument("--function", help="Specify a function name to check")
+    parser.add_argument("--permission-fractional-reads", default=4, type=int, help="How many read permissions a write permission can be split into")
     parser.add_argument("--permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed")
     parser.add_argument("--cut-point-expansion", action="store_const", const=True, default=False, help="Enable cut point expansion for confluence checking")
     logging.add_arguments(parser)
     args = parser.parse_args()
     logging.basic_config(args)
 
-    run_bisim(args.o2p, args.lso_ll, args.function, args.permission_unsat_core, args.cut_point_expansion)
+    run_bisim(args.o2p, args.lso_ll, args.function, args.permission_fractional_reads, args.permission_unsat_core, args.cut_point_expansion)
 
 
 if __name__ == "__main__":

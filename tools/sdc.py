@@ -118,6 +118,7 @@ def main():
 
     parser.add_argument("--bisim", action="store_const", const=True, default=False,
                         help="Enable bisimulation check after execution (this automatically disables --normal and enables --gen-lso-ll)")
+    parser.add_argument("--bisim-permission-fractional-reads", default=4, type=int, help="How many read permissions a write permission can be split into (for --bisim)")
     parser.add_argument("--bisim-permission-unsat-core", action="store_const", const=True, default=False, help="Output unsat core from the permission solver if failed (for --bisim)")
     parser.add_argument("--bisim-cut-point-expansion", action="store_const", const=True, default=False, help="Enable cut point expansion for confluence checking (for --bisim)")
 
@@ -274,7 +275,14 @@ def main():
 
             if args.bisim:
                 logger.info(f"running bisim check for function {function_name}")
-                run_bisim(final_o2p_path, final_lso_ll_path, function_name, args.bisim_permission_unsat_core, args.bisim_cut_point_expansion)
+                run_bisim(
+                    final_o2p_path,
+                    final_lso_ll_path,
+                    function_name,
+                    args.bisim_permission_fractional_reads,
+                    args.bisim_permission_unsat_core,
+                    args.bisim_cut_point_expansion,
+                )
 
     except Exception as e:
         delete = False

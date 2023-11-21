@@ -43,6 +43,10 @@ class ASTTransformer(Transformer):
     def inclusion(self, args: List[permission.Term]) -> permission.Inclusion:
         return permission.Inclusion(args[0], args[1])
 
+    def has_read(self, args: List[permission.Term]) -> permission.HasRead:
+        self.heap_objects[str(args[0])] = None
+        return permission.HasRead(str(args[0]), args[1])
+
     def equality(self, args: List[permission.Term]) -> permission.Equality:
         return permission.Equality(args[0], args[1])
 
@@ -93,11 +97,14 @@ SYNTAX = r"""
                        | atomic_formula ("and" atomic_formula)*
 
     atomic_formula: inclusion
+                  | has_read
                   | equality
                   | disjoint
                   | "(" formula ")" -> parentheses_formula
 
     inclusion: term "<=" term | term "⊑" term
+
+    has_read: "read" HEAP_OBJECT "<=" term | "read" HEAP_OBJECT "⊑" term
 
     equality: term "=" term
 
@@ -133,6 +140,7 @@ def parse_formulas(src: str) -> Tuple[Tuple[permission.Formula, ...], Tuple[str,
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input", help="Input file containing a list of permission constraints")
+    parser.add_argument("--read-fractions", default=4, type=int, help="How many read permissions can a write permission be split into")
     parser.add_argument("--unsat-core", action="store_const", const=True, default=False, help="Output unsat core")
     parser.add_argument("--solution", action="store_const", const=True, default=False, help="Output solution")
     args = parser.parse_args()
@@ -140,8 +148,10 @@ def main():
     with open(args.input) as input_file:
         constraints, heap_objects = parse_formulas(input_file.read())
 
+    assert args.read_fractions >= 1
+    perm_algebra = permission.FiniteFractionalPA(heap_objects, args.read_fractions)
     result = permission.PermissionSolver.solve_constraints(
-        heap_objects,
+        perm_algebra,
         constraints,
         unsat_core=args.unsat_core,
     )

@@ -83,7 +83,8 @@ def main():
 
             # Check memory permission constraints
             print(f"  {len(config.permission_constraints)} permission constraint(s)")
-            result = PermissionSolver.solve_constraints(heap_objects, config.permission_constraints)
+            perm_algebra = permission.FiniteFractionalPA(heap_objects, 4)
+            result = PermissionSolver.solve_constraints(perm_algebra, config.permission_constraints)
             # for constraint in config.permission_constraints:
             #     print(f"  {constraint}")
             if isinstance(result, ResultUnsat):

@@ -902,13 +902,7 @@ class Configuration:
             if isinstance(operator_state, LoadOperator):
                 # Require at least one read permission for each base pointer
                 for base_pointer in unique_base_pointers:
-                    self.permission_constraints.append(permission.Disjunction(tuple(
-                        permission.Inclusion(
-                            permission.Read(base_pointer, index),
-                            permission.DisjointUnion(input_permissions),
-                        )
-                        for index in range(permission.READ_COUNT)
-                    )))
+                    self.permission_constraints.append(permission.HasRead(base_pointer, permission.DisjointUnion(input_permissions)))
 
             else:
                 self.permission_constraints.append(permission.Inclusion(

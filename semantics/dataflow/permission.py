@@ -9,10 +9,6 @@ from .graph import DataflowGraph, FunctionArgument
 import semantics.smt as smt
 
 
-# How many reads can a write be split into
-READ_COUNT = 4
-
-
 class Term:
     def get_free_variables(self) -> Set[Variable]:
         raise NotImplementedError()
@@ -134,6 +130,28 @@ class Equality(Formula):
 
 
 @dataclass
+class HasRead(Formula):
+    """
+    This is a special case of inclusion specifically to say that a read permission is in a permission term.
+    """
+
+    heap_object: str
+    term: Term
+
+    def __str__(self):
+        return f"read {self.heap_object} ⊑ {self.term}"
+
+    def get_free_variables(self) -> Set[Variable]:
+        return self.term.get_free_variables()
+
+    def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
+        return HasRead(self.heap_object, self.term.substitute(substitution))
+
+    def is_atomic(self) -> bool:
+        return True
+
+
+@dataclass
 class Inclusion(Formula):
     """
     Permission left is included in permission right
@@ -208,126 +226,110 @@ class Disjunction(Formula):
         return False
 
 
-class PermissionAlgebra:
+class PermissionAlgebraElement:
     ...
 
 
-class RWPermissionPCM:
+class PermissionAlgebra:
+    def get_value_from_smt_model(self, element: PermissionAlgebraElement, model: smt.SMTModel) -> Term:
+        raise NotImplementedError()
+
+    def get_fresh_variable(self) -> Tuple[PermissionAlgebraElement, smt.SMTTerm]:
+        raise NotImplementedError()
+
+    def interpret_term(self, assignment: Mapping[Variable, PermissionAlgebraElement], term: Term) -> Tuple[PermissionAlgebraElement, smt.SMTTerm]:
+        raise NotImplementedError()
+
+    def interpret_formula(self, assignment: Mapping[Variable, PermissionAlgebraElement], formula: Formula) -> smt.SMTTerm:
+        raise NotImplementedError()
+
+
+@dataclass
+class FiniteFractionalPA(PermissionAlgebra):
     """
-    A concrete description of the permission PCM in SMT
-
-    ## Permission PCM
-    Given a set H of disjoint heap object names, the permission partial commutative monoid P(H)
-    consists of the following elements:
-      - Additive unit 0
-      - read A for any A in H
-      - write A for any A in H
-      - p1 + p2 for any terms p1 and p2
-    modulo the following axioms:
-      - read A + read A = read A
-      - associativity of +
-      - commutativity of +
-      - 0 + p = p + 0 = p
-
-    Furthermore, we also remove any element containing
-      - read A + write A
-      - write A + write A
-
-    ## Representing the PCM in SMT/SAT
-    For finite H, we encode each permission p in P(H) as a list of Boolean values.
-    For instance, suppose H = { A, B },
-    each element of P(H) is encoded as 2 * |H| Boolean values each corresponding to { read A, write A, read B, write B }:
-    read A |-> { 1, 0, 0, 0 }
-    read B |-> { 0, 0, 1, 0 }
-    write A |-> { 0, 1, 0, 0 }
-    read A + write B |-> { 1, 0, 0, 1 }
-    read A + write A |-> { 1, 1, 0, 0 } does not exist
+    Finite fractional permission algebra:
+    Elements { read 0, read 1, ..., read n, write }
     """
 
-    class Element:
-        def __init__(self, heap_objects: Tuple[str, ...], smt_terms: Mapping[str, Tuple[smt.SMTTerm, ...]]):
-            self.heap_objects = heap_objects
-            self.smt_terms = dict(smt_terms)
+    heap_objects: Tuple[str, ...]
+    read_count: int # how many reads can a write be split into
 
-        def get_value_from_smt_model(self, model: smt.SMTModel) -> Term:
-            # get a concrete interpretation from an SMT model
-            # assuming self.smt_terms only contains variables
+    @dataclass
+    class Element(PermissionAlgebraElement):
+        smt_terms: Mapping[str, Tuple[smt.SMTTerm, ...]]
 
-            subterms: List[Term] = []
+    def get_value_from_smt_model(self, element: FiniteFractionalPA.Element, model: smt.SMTModel) -> Term:
+        # get a concrete interpretation from an SMT model
+        # assuming self.smt_terms only contains variables
 
-            for obj in self.heap_objects:
-                tentative_subterms: List[Term] = []
-                is_write = True
+        subterms: List[Term] = []
 
-                for read_index in range(READ_COUNT):
-                    read_obj = model[self.smt_terms[obj][read_index]].constant_value()
+        for obj in self.heap_objects:
+            tentative_subterms: List[Term] = []
+            is_write = True
 
-                    if read_obj:
-                        tentative_subterms.append(Read(obj, read_index))
-                    else:
-                        is_write = False
+            for read_index in range(self.read_count):
+                read_obj = model[element.smt_terms[obj][read_index]].constant_value()
 
-                if is_write:
-                    subterms.append(Write(obj))
+                if read_obj:
+                    tentative_subterms.append(Read(obj, read_index))
                 else:
-                    subterms.extend(tentative_subterms)
+                    is_write = False
 
-            return DisjointUnion.of(*subterms)
+            if is_write:
+                subterms.append(Write(obj))
+            else:
+                subterms.extend(tentative_subterms)
 
-        @staticmethod
-        def get_zero(heap_objects: Tuple[str, ...]) -> RWPermissionPCM.Element:
-            return RWPermissionPCM.Element(heap_objects, {
-                obj: tuple(smt.FALSE() for _ in range(READ_COUNT))
-                for obj in heap_objects
-            })
+        return DisjointUnion.of(*subterms)
 
-        @staticmethod
-        def get_read_atom(heap_objects: Tuple[str, ...], target_obj: str, read_index: int) -> RWPermissionPCM.Element:
-            assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
-            return RWPermissionPCM.Element(heap_objects, {
-                obj:
-                    tuple(
-                        (smt.TRUE() if obj == target_obj and idx == read_index else smt.FALSE())
-                        for idx in range(READ_COUNT)
-                    )
-                for obj in heap_objects
-            })
+    def get_zero(self) -> FiniteFractionalPA.Element:
+        return FiniteFractionalPA.Element({
+            obj: tuple(smt.FALSE() for _ in range(self.read_count))
+            for obj in self.heap_objects
+        })
 
-        @staticmethod
-        def get_write_atom(heap_objects: Tuple[str, ...], target_obj: str) -> RWPermissionPCM.Element:
-            assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
-            return RWPermissionPCM.Element(heap_objects, {
-                obj: tuple(smt.TRUE() for _ in range(READ_COUNT)) if obj == target_obj else tuple(smt.FALSE() for _ in range(READ_COUNT))
-                for obj in heap_objects
-            })
+    def get_read_atom(self, target_obj: str, read_index: int) -> FiniteFractionalPA.Element:
+        assert target_obj in self.heap_objects, f"invalid heap object {target_obj} (only given {self.heap_objects})"
+        return FiniteFractionalPA.Element({
+            obj:
+                tuple(
+                    (smt.TRUE() if obj == target_obj and idx == read_index else smt.FALSE())
+                    for idx in range(self.read_count)
+                )
+            for obj in self.heap_objects
+        })
 
-        @staticmethod
-        def get_fresh_variable(heap_objects: Tuple[str, ...]) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
-            smt_vars = {
-                obj: tuple(smt.FreshSymbol(smt.BOOL) for _ in range(READ_COUNT))
-                for obj in heap_objects
-            }
+    def get_write_atom(self, target_obj: str) -> FiniteFractionalPA.Element:
+        assert target_obj in self.heap_objects, f"invalid heap object {target_obj} (only given {self.heap_objects})"
+        return FiniteFractionalPA.Element({
+            obj: tuple(smt.TRUE() for _ in range(self.read_count)) if obj == target_obj else tuple(smt.FALSE() for _ in range(self.read_count))
+            for obj in self.heap_objects
+        })
 
-            defined = smt.TRUE()
+    def get_fresh_variable(self) -> Tuple[FiniteFractionalPA.Element, smt.SMTTerm]:
+        smt_vars = {
+            obj: tuple(smt.FreshSymbol(smt.BOOL) for _ in range(self.read_count))
+            for obj in self.heap_objects
+        }
 
-            return RWPermissionPCM.Element(heap_objects, smt_vars), defined
+        defined = smt.TRUE()
 
-    def __init__(self, heap_objects: Tuple[str, ...]):
-        self.heap_objects = heap_objects
+        return FiniteFractionalPA.Element(smt_vars), defined
 
-    def interpret_term(self, assignment: Mapping[Variable, RWPermissionPCM.Element], term: Term) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
+    def interpret_term(self, assignment: Mapping[Variable, FiniteFractionalPA.Element], term: Term) -> Tuple[FiniteFractionalPA.Element, smt.SMTTerm]:
         """
         Interprete a term in the PCM, returning (permission element, condition to be well-defined)
         """
 
         if isinstance(term, Empty):
-            return RWPermissionPCM.Element.get_zero(self.heap_objects), smt.TRUE()
+            return self.get_zero(), smt.TRUE()
 
         if isinstance(term, Read):
-            return RWPermissionPCM.Element.get_read_atom(self.heap_objects, term.heap_object, term.index), smt.TRUE()
+            return self.get_read_atom(term.heap_object, term.index), smt.TRUE()
 
         if isinstance(term, Write):
-            return RWPermissionPCM.Element.get_write_atom(self.heap_objects, term.heap_object), smt.TRUE()
+            return self.get_write_atom(term.heap_object), smt.TRUE()
 
         if isinstance(term, Variable):
             assert term in assignment, f"unable ot find variable {term} in the given assignment"
@@ -340,23 +342,23 @@ class RWPermissionPCM:
                 smt.And(
                     smt.AtMostOne(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
                     for obj in self.heap_objects
-                    for index in range(READ_COUNT)
+                    for index in range(self.read_count)
                 ),
             )
 
             interp: Dict[str, Tuple[smt.SMTTerm, smt.SMTTerm]] = {
                 obj: tuple(
                     smt.Or(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
-                    for index in range(READ_COUNT)
+                    for index in range(self.read_count)
                 )
                 for obj in self.heap_objects
             }
 
-            return RWPermissionPCM.Element(self.heap_objects, interp), defined
+            return FiniteFractionalPA.Element(interp), defined
 
         assert False, f"unsupported term {term}"
 
-    def interpret_formula(self, assignment: Mapping[Variable, RWPermissionPCM.Element], formula: Formula) -> smt.SMTTerm:
+    def interpret_formula(self, assignment: Mapping[Variable, FiniteFractionalPA.Element], formula: Formula) -> smt.SMTTerm:
         """
         Interpret a formula in the PCM, returning (truth, condition to be well-defined)
         """
@@ -367,12 +369,20 @@ class RWPermissionPCM:
             interp = smt.And(
                 smt.And(
                     smt.Iff(left_interp.smt_terms[obj][i], right_interp.smt_terms[obj][i])
-                    for i in range(READ_COUNT)
+                    for i in range(self.read_count)
                 )
                 for obj in self.heap_objects
             )
             defined = smt.And(left_defined, right_defined)
             return smt.And(interp, defined)
+
+        if isinstance(formula, HasRead):
+            term_interp, term_defined = self.interpret_term(assignment, formula.term)
+            interp = smt.Or(
+                term_interp.smt_terms[formula.heap_object][index]
+                for index in range(self.read_count)
+            )
+            return smt.And(interp, term_defined)
 
         if isinstance(formula, Inclusion):
             left_interp, left_defined = self.interpret_term(assignment, formula.left)
@@ -383,7 +393,7 @@ class RWPermissionPCM:
                     right_interp.smt_terms[obj][index],
                 )
                 for obj in self.heap_objects
-                for index in range(READ_COUNT)
+                for index in range(self.read_count)
             )
             defined = smt.And(left_defined, right_defined)
             return smt.And(interp, defined)
@@ -393,7 +403,7 @@ class RWPermissionPCM:
             interp = smt.And(
                 smt.AtMostOne(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
                 for obj in self.heap_objects
-                for index in range(READ_COUNT)
+                for index in range(self.read_count)
             )
             defined = smt.And(cond for _, cond in subterm_interps)
             return smt.And(interp, defined)
@@ -470,7 +480,7 @@ class PermissionSolver:
 
     @staticmethod
     def solve_constraints(
-        heap_objects: Tuple[str, ...],
+        perm_algebra: PermissionAlgebra,
         constraints: Iterable[Formula],
         unsat_core: bool = False, # generate an unsat core if unsat
     ) -> SolverResult:
@@ -479,15 +489,15 @@ class PermissionSolver:
         for constraint in constraints:
             free_vars.update(constraint.get_free_variables())
 
-        assignment: Dict[Variable, RWPermissionPCM.Element] = {}
+        # perm_algebra = FiniteFractionalPA(heap_objects)
+
+        assignment: Dict[Variable, PermissionAlgebraElement] = {}
         assignment_defined = smt.TRUE()
 
         for var in free_vars:
-            smt_var, defined = RWPermissionPCM.Element.get_fresh_variable(heap_objects)
+            smt_var, defined = perm_algebra.get_fresh_variable()
             assignment[var] = smt_var
             assignment_defined = smt.And(assignment_defined, defined)
-
-        pcm = RWPermissionPCM(heap_objects)
 
         formula_to_constraint: Dict[smt.SMTTerm, Union[str, Formula]] = {}
 
@@ -498,7 +508,7 @@ class PermissionSolver:
                 formula_to_constraint[assignment_defined] = "(definedness of free variables)"
 
             for constraint in constraints:
-                valid = pcm.interpret_formula(assignment, constraint)
+                valid = perm_algebra.interpret_formula(assignment, constraint)
                 solver.add_assertion(valid)
 
                 if unsat_core:
@@ -507,7 +517,7 @@ class PermissionSolver:
             if solver.solve():
                 model = solver.get_model()
                 solution = {
-                    var: assignment[var].get_value_from_smt_model(model)
+                    var: perm_algebra.get_value_from_smt_model(assignment[var], model)
                     for var in free_vars
                 }
 

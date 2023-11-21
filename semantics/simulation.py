@@ -174,10 +174,12 @@ class SimulationChecker:
         dataflow_graph: dataflow.DataflowGraph,
         llvm_function: llvm.Function,
         cut_point_placement: CutPointPlacement,
+        permission_fractional_reads: int = 4,
         permission_unsat_core: bool = False,
         cut_point_expansion: bool = True,
     ):
         self.solver = smt.Solver(name="z3", random_seed=0)
+        self.permission_fractional_reads = permission_fractional_reads
         self.permission_unsat_core = permission_unsat_core
         self.cut_point_expansion = cut_point_expansion
 
@@ -761,8 +763,9 @@ class SimulationChecker:
         # for constraint in constraints:
         #     print(constraint)
 
+        perm_algebra = dataflow.permission.FiniteFractionalPA(tuple(self.heap_objects), self.permission_fractional_reads)
         result = dataflow.permission.PermissionSolver.solve_constraints(
-            tuple(self.heap_objects),
+            perm_algebra,
             constraints,
             unsat_core=self.permission_unsat_core,
         )

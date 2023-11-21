@@ -253,10 +253,6 @@ OPERATOR_INFO = {
 
 class DataflowVisualizer:
     @staticmethod
-    def generate_tikz() -> str:
-        ...
-
-    @staticmethod
     def generate_dot_description(
         graph: DataflowGraph,
         pe_label: Optional[Callable[[ProcessingElement], str]] = None,
@@ -280,7 +276,7 @@ class DataflowVisualizer:
                 label = label[1:-1]
             else:
                 label = html.escape(label)
-
+            
             if pe.llvm_position is not None and llvm_annotation:
                 label += f"<FONT point-size=\"5\"><BR/>{pe.llvm_position[0]}:{pe.llvm_position[1]}</FONT>"
 
@@ -319,7 +315,7 @@ class DataflowVisualizer:
 
             else:
                 if isinstance(channel.constant, FunctionArgument):
-                    label = channel.constant.variable_name
+                    label = channel.constant.variable_name                    
                 else:
                     assert isinstance(channel.constant, ConstantValue)
                     label = str(channel.constant.value)

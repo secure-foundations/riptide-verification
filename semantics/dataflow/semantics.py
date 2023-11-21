@@ -896,21 +896,28 @@ class Configuration:
                 if base_pointer not in unique_base_pointers:
                     unique_base_pointers.append(base_pointer)
 
-            if len(base_pointers) != 0:
-                if isinstance(operator_state, LoadOperator):
-                    mem_permission = permission.DisjointUnion.of(*(
-                        permission.Read(base_pointer)
-                        for base_pointer in unique_base_pointers
-                    ))
-                else:
-                    mem_permission = permission.DisjointUnion.of(*(
+            if len(unique_base_pointers) == 0:
+                assert False, "unsupported permission for store/load"
+
+            if isinstance(operator_state, LoadOperator):
+                # Require at least one read permission for each base pointer
+                for base_pointer in unique_base_pointers:
+                    self.permission_constraints.append(permission.Disjunction(tuple(
+                        permission.Inclusion(
+                            permission.Read(base_pointer, index),
+                            permission.DisjointUnion(input_permissions),
+                        )
+                        for index in range(permission.READ_COUNT)
+                    )))
+
+            else:
+                self.permission_constraints.append(permission.Inclusion(
+                    permission.DisjointUnion.of(*(
                         permission.Write(base_pointer)
                         for base_pointer in unique_base_pointers
-                    ))
-
-                self.permission_constraints.append(permission.Inclusion(mem_permission, permission.DisjointUnion(input_permissions)))
-            else:
-                assert False, "unsupported permission for store/load"
+                    )),
+                    permission.DisjointUnion(input_permissions),
+                ))
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"{PERMISSION_PREFIX_EXEC}{PERMISSION_PREFIX_INTERNAL}{pe_info.id}-")

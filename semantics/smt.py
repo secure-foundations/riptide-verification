@@ -4,7 +4,7 @@ from contextlib import contextmanager
 
 from pysmt.shortcuts import ( # type: ignore
     FreshSymbol, Symbol,
-    TRUE, FALSE, And, Or, Not, Xor, ExactlyOne, Implies, Iff, ForAll, Exists, Ite, Equals,
+    TRUE, FALSE, And, Or, Not, Xor, ExactlyOne, AtMostOne, Implies, Iff, ForAll, Exists, Ite, Equals,
     GT, GE, LT, LE,
     BV, Int, Bool,
     get_model, get_unsat_core, Solver, UnsatCoreSolver,

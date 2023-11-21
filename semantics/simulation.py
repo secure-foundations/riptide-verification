@@ -778,6 +778,9 @@ class SimulationChecker:
             assert isinstance(result, dataflow.permission.ResultSat)
             logger.debug("sat - confluent")
 
+            # for var, term in result.solution.items():
+            #     print(f"{var} = {term}")
+
     def check_branch_bisimulation_obligation(self, dataflow_branch: DataflowBranch):
         llvm_branch = dataflow_branch.llvm_branch
         logger.debug(f"checking bisimulation obligations for a branch from cut point {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'}")

@@ -9,14 +9,15 @@ from .graph import DataflowGraph, FunctionArgument
 import semantics.smt as smt
 
 
+# How many reads can a write be split into
+READ_COUNT = 4
+
+
 class Term:
     def get_free_variables(self) -> Set[Variable]:
         raise NotImplementedError()
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
-        raise NotImplementedError()
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         raise NotImplementedError()
 
 
@@ -31,29 +32,19 @@ class Empty(Term):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return self
 
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
-        return self
-
 
 @dataclass
 class Read(Term):
     heap_object: str
+    index: int # [0, READ_COUNT)
 
     def __str__(self):
-        return f"read {self.heap_object}"
+        return f"read ({self.index}) {self.heap_object}"
 
     def get_free_variables(self) -> Set[Variable]:
         return set()
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
-        return self
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
-        if self.heap_object in substitution:
-            if substitution[self.heap_object] is None:
-                return Empty()
-            else:
-                return Read(substitution[self.heap_object])
         return self
 
 
@@ -68,14 +59,6 @@ class Write(Term):
         return set()
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
-        return self
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
-        if self.heap_object in substitution:
-            if substitution[self.heap_object] is None:
-                return Empty()
-            else:
-                return Write(substitution[self.heap_object])
         return self
 
 
@@ -95,9 +78,6 @@ class Variable(Term):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         if self in substitution:
             return substitution[self]
-        return self
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
         return self
 
 
@@ -123,18 +103,12 @@ class DisjointUnion(Term):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return DisjointUnion.of(*(term.substitute(substitution) for term in self.terms))
 
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Term:
-        return DisjointUnion.of(*(term.substitute_heap_object(substitution) for term in self.terms))
-
 
 class Formula:
     def get_free_variables(self) -> Set[Variable]:
         raise NotImplementedError()
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Formula:
-        raise NotImplementedError()
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
         raise NotImplementedError()
 
     def is_atomic(self) -> bool:
@@ -154,9 +128,6 @@ class Equality(Formula):
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Equality(self.left.substitute(substitution), self.right.substitute(substitution))
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
-        return Equality(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
 
     def is_atomic(self) -> bool:
         return True
@@ -179,9 +150,6 @@ class Inclusion(Formula):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Inclusion(self.left.substitute(substitution), self.right.substitute(substitution))
 
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
-        return Inclusion(self.left.substitute_heap_object(substitution), self.right.substitute_heap_object(substitution))
-
     def is_atomic(self) -> bool:
         return True
 
@@ -202,9 +170,6 @@ class Disjoint(Formula):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Disjoint(tuple(term.substitute(substitution) for term in self.terms))
 
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
-        return Disjoint(tuple(term.substitute_heap_object(substitution) for term in self.terms))
-
     def is_atomic(self) -> bool:
         return True
 
@@ -221,9 +186,6 @@ class Conjunction(Formula):
 
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Conjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
-
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
-        return Conjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
 
     def is_atomic(self) -> bool:
         return False
@@ -242,11 +204,12 @@ class Disjunction(Formula):
     def substitute(self, substitution: Mapping[Variable, Term]) -> Term:
         return Disjunction(tuple(formula.substitute(substitution) for formula in self.formulas))
 
-    def substitute_heap_object(self, substitution: Mapping[str, Optional[str]]) -> Formula:
-        return Disjunction(tuple(formula.substitute_heap_object(substitution) for formula in self.formulas))
-
     def is_atomic(self) -> bool:
         return False
+
+
+class PermissionAlgebra:
+    ...
 
 
 class RWPermissionPCM:
@@ -282,7 +245,7 @@ class RWPermissionPCM:
     """
 
     class Element:
-        def __init__(self, heap_objects: Tuple[str, ...], smt_terms: Mapping[str, Tuple[smt.SMTTerm, smt.SMTTerm]]):
+        def __init__(self, heap_objects: Tuple[str, ...], smt_terms: Mapping[str, Tuple[smt.SMTTerm, ...]]):
             self.heap_objects = heap_objects
             self.smt_terms = dict(smt_terms)
 
@@ -293,30 +256,40 @@ class RWPermissionPCM:
             subterms: List[Term] = []
 
             for obj in self.heap_objects:
-                read_obj = model[self.smt_terms[obj][0]].constant_value()
-                write_obj = model[self.smt_terms[obj][1]].constant_value()
-                assert not (read_obj and write_obj), "a valid permission should not have both read and write to a heap object"
+                tentative_subterms: List[Term] = []
+                is_write = True
 
-                if read_obj:
-                    subterms.append(Read(obj))
+                for read_index in range(READ_COUNT):
+                    read_obj = model[self.smt_terms[obj][read_index]].constant_value()
 
-                if write_obj:
+                    if read_obj:
+                        tentative_subterms.append(Read(obj, read_index))
+                    else:
+                        is_write = False
+
+                if is_write:
                     subterms.append(Write(obj))
+                else:
+                    subterms.extend(tentative_subterms)
 
             return DisjointUnion.of(*subterms)
 
         @staticmethod
         def get_zero(heap_objects: Tuple[str, ...]) -> RWPermissionPCM.Element:
             return RWPermissionPCM.Element(heap_objects, {
-                obj: (smt.FALSE(), smt.FALSE())
+                obj: tuple(smt.FALSE() for _ in range(READ_COUNT))
                 for obj in heap_objects
             })
 
         @staticmethod
-        def get_read_atom(heap_objects: Tuple[str, ...], target_obj: str) -> RWPermissionPCM.Element:
+        def get_read_atom(heap_objects: Tuple[str, ...], target_obj: str, read_index: int) -> RWPermissionPCM.Element:
             assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
             return RWPermissionPCM.Element(heap_objects, {
-                obj: (smt.TRUE(), smt.FALSE()) if obj == target_obj else (smt.FALSE(), smt.FALSE())
+                obj:
+                    tuple(
+                        (smt.TRUE() if obj == target_obj and idx == read_index else smt.FALSE())
+                        for idx in range(READ_COUNT)
+                    )
                 for obj in heap_objects
             })
 
@@ -324,21 +297,18 @@ class RWPermissionPCM:
         def get_write_atom(heap_objects: Tuple[str, ...], target_obj: str) -> RWPermissionPCM.Element:
             assert target_obj in heap_objects, f"invalid heap object {target_obj} (only given {heap_objects})"
             return RWPermissionPCM.Element(heap_objects, {
-                obj: (smt.FALSE(), smt.TRUE()) if obj == target_obj else (smt.FALSE(), smt.FALSE())
+                obj: tuple(smt.TRUE() for _ in range(READ_COUNT)) if obj == target_obj else tuple(smt.FALSE() for _ in range(READ_COUNT))
                 for obj in heap_objects
             })
 
         @staticmethod
-        def get_free_variable(heap_objects: Tuple[str, ...]) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
+        def get_fresh_variable(heap_objects: Tuple[str, ...]) -> Tuple[RWPermissionPCM.Element, smt.SMTTerm]:
             smt_vars = {
-                obj: (smt.FreshSymbol(smt.BOOL), smt.FreshSymbol(smt.BOOL))
+                obj: tuple(smt.FreshSymbol(smt.BOOL) for _ in range(READ_COUNT))
                 for obj in heap_objects
             }
 
-            defined = smt.And(
-                smt.Not(smt.And(smt_vars[obj][0], smt_vars[obj][1]))
-                for obj in heap_objects
-            )
+            defined = smt.TRUE()
 
             return RWPermissionPCM.Element(heap_objects, smt_vars), defined
 
@@ -354,7 +324,7 @@ class RWPermissionPCM:
             return RWPermissionPCM.Element.get_zero(self.heap_objects), smt.TRUE()
 
         if isinstance(term, Read):
-            return RWPermissionPCM.Element.get_read_atom(self.heap_objects, term.heap_object), smt.TRUE()
+            return RWPermissionPCM.Element.get_read_atom(self.heap_objects, term.heap_object, term.index), smt.TRUE()
 
         if isinstance(term, Write):
             return RWPermissionPCM.Element.get_write_atom(self.heap_objects, term.heap_object), smt.TRUE()
@@ -365,29 +335,22 @@ class RWPermissionPCM:
 
         if isinstance(term, DisjointUnion):
             subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in term.terms)
-            defined = smt.And(cond for _, cond in subterm_interps)
+            defined = smt.And(
+                smt.And(cond for _, cond in subterm_interps),
+                smt.And(
+                    smt.AtMostOne(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
+                    for obj in self.heap_objects
+                    for index in range(READ_COUNT)
+                ),
+            )
 
-            interp: Dict[str, Tuple[smt.SMTTerm, smt.SMTTerm]] = {}
-
-            for obj in self.heap_objects:
-                defined = smt.And(
-                    defined,
-                    smt.Or(
-                        # no write
-                        smt.Not(smt.Or(subterm_interp.smt_terms[obj][1] for subterm_interp, _ in subterm_interps)),
-
-                        # exactly one write and no read
-                        smt.And(
-                            smt.ExactlyOne(subterm_interp.smt_terms[obj][1] for subterm_interp, _ in subterm_interps),
-                            smt.Not(smt.Or(subterm_interp.smt_terms[obj][0] for subterm_interp, _ in subterm_interps))
-                        ),
-                    ),
+            interp: Dict[str, Tuple[smt.SMTTerm, smt.SMTTerm]] = {
+                obj: tuple(
+                    smt.Or(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
+                    for index in range(READ_COUNT)
                 )
-
-                interp[obj] = (
-                    smt.Or(subterm_interp.smt_terms[obj][0] for subterm_interp, _ in subterm_interps),
-                    smt.Or(subterm_interp.smt_terms[obj][1] for subterm_interp, _ in subterm_interps),
-                )
+                for obj in self.heap_objects
+            }
 
             return RWPermissionPCM.Element(self.heap_objects, interp), defined
 
@@ -403,8 +366,8 @@ class RWPermissionPCM:
             right_interp, right_defined = self.interpret_term(assignment, formula.right)
             interp = smt.And(
                 smt.And(
-                    smt.Iff(left_interp.smt_terms[obj][0], right_interp.smt_terms[obj][0]),
-                    smt.Iff(left_interp.smt_terms[obj][1], right_interp.smt_terms[obj][1]),
+                    smt.Iff(left_interp.smt_terms[obj][i], right_interp.smt_terms[obj][i])
+                    for i in range(READ_COUNT)
                 )
                 for obj in self.heap_objects
             )
@@ -415,12 +378,12 @@ class RWPermissionPCM:
             left_interp, left_defined = self.interpret_term(assignment, formula.left)
             right_interp, right_defined = self.interpret_term(assignment, formula.right)
             interp = smt.And(
-                smt.Or(
-                    right_interp.smt_terms[obj][1],
-                    smt.And(right_interp.smt_terms[obj][0], smt.Not(left_interp.smt_terms[obj][1])),
-                    smt.And(smt.Not(left_interp.smt_terms[obj][0]), smt.Not(left_interp.smt_terms[obj][1])),
+                smt.Implies(
+                    left_interp.smt_terms[obj][index],
+                    right_interp.smt_terms[obj][index],
                 )
                 for obj in self.heap_objects
+                for index in range(READ_COUNT)
             )
             defined = smt.And(left_defined, right_defined)
             return smt.And(interp, defined)
@@ -428,28 +391,18 @@ class RWPermissionPCM:
         if isinstance(formula, Disjoint):
             subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in formula.terms)
             interp = smt.And(
-                smt.Or(
-                    # no write
-                    smt.Not(smt.Or(subterm_interp.smt_terms[obj][1] for subterm_interp, _ in subterm_interps)),
-
-                    # exactly one write and no read
-                    smt.And(
-                        smt.ExactlyOne(subterm_interp.smt_terms[obj][1] for subterm_interp, _ in subterm_interps),
-                        smt.Not(smt.Or(subterm_interp.smt_terms[obj][0] for subterm_interp, _ in subterm_interps))
-                    ),
-                )
+                smt.AtMostOne(subterm_interp.smt_terms[obj][index] for subterm_interp, _ in subterm_interps)
                 for obj in self.heap_objects
+                for index in range(READ_COUNT)
             )
             defined = smt.And(cond for _, cond in subterm_interps)
             return smt.And(interp, defined)
 
         if isinstance(formula, Conjunction):
-            subformula_interps = tuple(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
-            return smt.And(*subformula_interps)
+            return smt.And(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
 
         if isinstance(formula, Disjunction):
-            subformula_interps = tuple(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
-            return smt.Or(*subformula_interps)
+            return smt.Or(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
 
         assert False, f"unsupported formula {formula}"
 
@@ -530,7 +483,7 @@ class PermissionSolver:
         assignment_defined = smt.TRUE()
 
         for var in free_vars:
-            smt_var, defined = RWPermissionPCM.Element.get_free_variable(heap_objects)
+            smt_var, defined = RWPermissionPCM.Element.get_fresh_variable(heap_objects)
             assignment[var] = smt_var
             assignment_defined = smt.And(assignment_defined, defined)
 

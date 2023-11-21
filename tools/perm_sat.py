@@ -62,8 +62,8 @@ class ASTTransformer(Transformer):
         return permission.Variable(str(args[0]))
 
     def read(self, args: List[Token]) -> permission.Read:
-        self.heap_objects[str(args[0])] = None
-        return permission.Read(str(args[0]))
+        self.heap_objects[str(args[1])] = None
+        return permission.Read(str(args[1]), int(str(args[0])))
 
     def write(self, args: List[Token]) -> permission.Write:
         self.heap_objects[str(args[0])] = None
@@ -78,8 +78,9 @@ SYNTAX = r"""
     %ignore INLINE_COMMENT
     %ignore /[ \n\t\f\r]+/
 
-    PERMISSION_NAME: /[a-zA-Z0-9\-]+/
+    PERMISSION_NAME: /[a-zA-Z][a-zA-Z0-9\-]*/
     HEAP_OBJECT: /%((0|[1-9][0-9]*)|([A-Za-z._][A-Za-z0-9-_'.]*))/
+    INTEGER: /0|[1-9][0-9]*/
 
     formulas: formula*
 
@@ -106,7 +107,7 @@ SYNTAX = r"""
         | atomic_term ("+" atomic_term)+ -> disjoint_union
 
     atomic_term: "p" "(" PERMISSION_NAME ")" -> variable
-               | "read" HEAP_OBJECT -> read
+               | "read" "(" INTEGER ")" HEAP_OBJECT -> read
                | "write" HEAP_OBJECT -> write
                | "(" term ")" -> parentheses_term
 """
@@ -139,19 +140,18 @@ def main():
     with open(args.input) as input_file:
         constraints, heap_objects = parse_formulas(input_file.read())
 
-    solution = permission.PermissionSolver.solve_constraints(
+    result = permission.PermissionSolver.solve_constraints(
         heap_objects,
         constraints,
-        debug_unsat_core=args.unsat_core,
+        unsat_core=args.unsat_core,
     )
 
-    if solution is None:
+    if isinstance(result, permission.ResultUnsat):
         print("unsat")
     else:
         print("sat")
-
         if args.solution:
-            for var, term in solution.items():
+            for var, term in result.solution.items():
                 print(f"{var} = {term}")
 
 

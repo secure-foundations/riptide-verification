@@ -89,6 +89,10 @@ def main():
             if isinstance(result, ResultUnsat):
                 print("unable to find consistent permission assignment, potential data race")
                 break
+            # else:
+            #     assert isinstance(result, ResultSat)
+            #     for var, term in result.solution.items():
+            #         print(f"{var} = {term}")
 
             print("  found a permission solution")
 

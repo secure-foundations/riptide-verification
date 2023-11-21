@@ -4,7 +4,7 @@ from typing import Tuple, Iterable, Optional, List, OrderedDict, Dict, Union
 from dataclasses import dataclass
 from collections import OrderedDict
 
-import sys
+import time
 import logging
 
 import semantics.smt as smt
@@ -770,7 +770,7 @@ class SimulationChecker:
             unsat_core=self.permission_unsat_core,
         )
         if isinstance(result, dataflow.permission.ResultUnsat):
-            logger.warning("unsat - may not be confluent")
+            logger.warning("confluence check result: unsat - may not be confluent")
 
             if self.permission_unsat_core:
                 unsat_core = result.unsat_core
@@ -779,7 +779,7 @@ class SimulationChecker:
 
         else:
             assert isinstance(result, dataflow.permission.ResultSat)
-            logger.debug("sat - confluent")
+            logger.debug("confluence check result: sat - confluent")
 
             # for var, term in result.solution.items():
             #     print(f"{var} = {term}")
@@ -826,6 +826,8 @@ class SimulationChecker:
         for i in range(self.num_cut_points):
             for dataflow_branch in self.final_dataflow_branches[i]:
                 self.check_branch_bisimulation_obligation(dataflow_branch)
+
+        logger.debug("bisim check succeeds")
 
     def check_dataflow_matches(self):
         """
@@ -1052,8 +1054,15 @@ class SimulationChecker:
         )
 
     def run_all_checks(self):
+        start_time = time.process_time()
         self.match_llvm_branches()
         self.generate_dataflow_cut_points()
         self.check_dataflow_matches()
         self.check_bisimulation()
+        elapsed = time.process_time() - start_time
+        logger.debug(f"bisim check took {round(elapsed, 2)}s")
+
+        start_time = time.process_time()
         self.check_confluence()
+        elapsed = time.process_time() - start_time
+        logger.debug(f"confluence check took {round(elapsed, 2)}s")

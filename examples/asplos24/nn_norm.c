@@ -2,7 +2,7 @@
 #include "stddef.h"
 #include "limits.h"
 
-void nn_normalize(int * src, int * dest,
+void nn_norm(int * src, int * dest,
 	int size, int max, int shift) {
 
 	int * src_ptr = src;

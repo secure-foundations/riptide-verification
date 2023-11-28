@@ -316,14 +316,50 @@ class Configuration:
                     self.eval_value(instr.right),
                 )
 
+            elif instr.cond == "sge":
+                result = smt.BVSGE(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
             elif instr.cond == "sgt":
                 result = smt.BVSGT(
                     self.eval_value(instr.left),
                     self.eval_value(instr.right),
                 )
 
+            elif instr.cond == "sle":
+                result = smt.BVSLE(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
             elif instr.cond == "slt":
                 result = smt.BVSLT(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
+            elif instr.cond == "uge":
+                result = smt.BVUGE(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
+            elif instr.cond == "ugt":
+                result = smt.BVUGT(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
+            elif instr.cond == "ule":
+                result = smt.BVULE(
+                    self.eval_value(instr.left),
+                    self.eval_value(instr.right),
+                )
+
+            elif instr.cond == "ult":
+                result = smt.BVULT(
                     self.eval_value(instr.left),
                     self.eval_value(instr.right),
                 )

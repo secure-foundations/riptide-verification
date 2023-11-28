@@ -146,10 +146,22 @@ class MulOperator(Operator):
         return smt.BVMul(a, b)
 
 
+@Operator.implement("ARITH_CFG_OP_SGE")
+class SignedGreaterThanOrEqualOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.BVSGE(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
+
+
 @Operator.implement("ARITH_CFG_OP_SGT")
 class SignedGreaterThanOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.Ite(smt.BVSGT(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
+
+
+@Operator.implement("ARITH_CFG_OP_SLE")
+class SignedLessThanOrEqualOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.BVSLE(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
 
 
 @Operator.implement("ARITH_CFG_OP_SLT")
@@ -158,10 +170,22 @@ class SignedLessThanOperator(Operator):
         return smt.Ite(smt.BVSLT(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
 
 
+@Operator.implement("ARITH_CFG_OP_UGE")
+class UnsignedGreaterThanOrEqualOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.BVUGE(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
+
+
 @Operator.implement("ARITH_CFG_OP_UGT")
 class UnsignedGreaterThanOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
         return smt.Ite(smt.BVUGT(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
+
+
+@Operator.implement("ARITH_CFG_OP_ULE")
+class UnsignedLessThanOrEqualOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
+        return smt.Ite(smt.BVULE(a, b), smt.BVConst(1, WORD_WIDTH), smt.BVConst(0, WORD_WIDTH))
 
 
 @Operator.implement("ARITH_CFG_OP_ULT")

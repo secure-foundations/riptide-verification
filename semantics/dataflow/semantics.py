@@ -580,7 +580,7 @@ class Configuration:
 
                 if self_channel.hold_constant is None:
                     if len(self_channel.values) != len(other_channel.values):
-                        return MatchingFailure(f"unmatched channel queue length at channel {i} ({len(self_channel.values)} vs {len(other_channel.values)})")
+                        return MatchingFailure(f"unmatched channel queue length at channel {i} ({len(self_channel.values)} vs {len(other_channel.values)})"), None
                     else:
                         for self_value, other_value in zip(self_channel.values, other_channel.values):
                             result = result.merge(MatchingResult.match_smt_terms(self_value.term, other_value.term))

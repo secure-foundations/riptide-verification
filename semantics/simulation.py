@@ -420,7 +420,7 @@ class SimulationChecker:
                 elif len(results) > 1:
                     return branch(results)
 
-                # Step on all carry gates with a decider value
+                # Step on all merge gates in the initial state
                 results = config.step_until_branch(
                     (
                         pe_id
@@ -492,7 +492,7 @@ class SimulationChecker:
                 return branch(results)
             else:
                 logger.debug(config)
-                assert False, f"PE {pe_id} corresponding to llvm instruction {position} not ready when scheduled to fire"
+                assert False, f"PE {pe_id} {scheduled_pe_ids} corresponding to llvm instruction {position} not ready when scheduled to fire"
 
             dataflow_branches = run_misc_operators()
             if dataflow_branches:

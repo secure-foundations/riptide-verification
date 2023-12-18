@@ -1,4 +1,4 @@
-FlowCert: Translation Validation for RipTide
+WaveCert: Translation Validation for RipTide
 ---
 
 This project is a translation validation tool for the [RipTide](https://doi.org/10.1109/MICRO56248.2022.00046)
@@ -17,7 +17,23 @@ Run `python3 -m pip install -r requirements.txt` before using any of the tools b
 
 ### `tools.sdc`: A wrapper for RipTide's standalone dataflow compiler with translation validation
 
-Coming soon.
+WaveCert requires the RipTide dataflow compiler to work, which is currently not public yet.
+But assuming the dataflow compiler (sdc) is available as a shared library `<LIBDC>` (with extension `.so`/`.dylib`),
+and LLVM 12.0.0 binaries are located in the directory `<LLVM_BIN>`, then we can use it via:
+```
+python3 -m tools.sdc --lib-dc <LIBDC> --llvm-bin <LLVM_BIN> --gen-lso-ll --bisim <input .c file>
+```
+which will compile all functions in the input C file to dataflow graphs, and also perform translation validation after each compilation
+to check the correctness of compilation.
+
+If the script succeeds without exception and the output of the script includes these lines
+```
+bisim check succeeds
+```
+```
+confluence check result: sat - confluent
+```
+Then the tool verifies that the compilation is correct (in our model of dataflow graphs).
 
 ### `tools.run_llvm`: A symbolic executor for LLVM
 

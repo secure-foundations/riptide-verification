@@ -55,6 +55,15 @@ spec fn valid_graph(graph: Graph) -> bool
         graph.operators.contains(#[trigger] graph.outputs[channel]))
 }
 
+spec fn get_op_state(graph: Graph, config: Configuration, op: OperatorIndex) -> State
+{
+    match config.operators[op] {
+        Operator::NonMemory { state } => state,
+        Operator::Read { address, sync, output } => 0,
+        Operator::Write { address, value, sync, output } => 0,
+    }
+}
+
 /**
  * Conditions for a valid config wrt a dataflow graph
  */
@@ -120,7 +129,9 @@ spec fn valid_config(graph: Graph, config: Configuration) -> bool
             graph.channels.contains(output) &&
             graph.outputs[address] == op &&
             graph.outputs[sync] == op &&
-            graph.inputs[output] == op,
+            graph.inputs[output] == op &&
+            state_inputs(op, get_op_state(graph, config, op)) =~= seq![address, sync] &&
+            state_outputs(op, get_op_state(graph, config, op)) =~= seq![output],
 
         Operator::Write { address, value, sync, output } =>
             address != value &&
@@ -133,7 +144,9 @@ spec fn valid_config(graph: Graph, config: Configuration) -> bool
             graph.outputs[address] == op &&
             graph.outputs[value] == op &&
             graph.outputs[sync] == op &&
-            graph.inputs[output] == op,
+            graph.inputs[output] == op &&
+            state_inputs(op, get_op_state(graph, config, op)) =~= seq![address, value, sync] &&
+            state_outputs(op, get_op_state(graph, config, op)) =~= seq![output],
 
         _ => true,
     })
@@ -215,9 +228,10 @@ spec fn step(graph: Graph, config: Configuration, op: OperatorIndex) -> Configur
             let address_value = config.channels[address][0];
             let output_value = config.memory[address_value];
 
-            let input_updated_channels1 = config.channels.insert(address, config.channels[address].take(1));
-            let input_updated_channels2 = input_updated_channels1.insert(sync, input_updated_channels1[sync].take(1));
-            let output_updated_channels = input_updated_channels2.insert(output, input_updated_channels2[output].push(output_value));
+            let input_updated_channels = config.channels
+                .insert(address, config.channels[address].skip(1))
+                .insert(sync, config.channels[sync].skip(1));
+            let output_updated_channels = input_updated_channels.insert(output, input_updated_channels[output].push(output_value));
 
             Configuration {
                 operators: config.operators,
@@ -231,10 +245,11 @@ spec fn step(graph: Graph, config: Configuration, op: OperatorIndex) -> Configur
             let value_value = config.channels[value][0];
             let output_value = 1;
 
-            let input_updated_channels1 = config.channels.insert(address, config.channels[address].take(1));
-            let input_updated_channels2 = input_updated_channels1.insert(value, input_updated_channels1[value].take(1));
-            let input_updated_channels3 = input_updated_channels2.insert(sync, input_updated_channels2[sync].take(1));
-            let output_updated_channels = input_updated_channels3.insert(output, input_updated_channels3[output].push(output_value));
+            let input_updated_channels = config.channels
+                .insert(address, config.channels[address].skip(1))
+                .insert(value, config.channels[value].skip(1))
+                .insert(sync, config.channels[sync].skip(1));
+            let output_updated_channels = input_updated_channels.insert(output, input_updated_channels[output].push(output_value));
 
             Configuration {
                 operators: config.operators,
@@ -245,10 +260,156 @@ spec fn step(graph: Graph, config: Configuration, op: OperatorIndex) -> Configur
     }
 }
 
+type PermissionAtom = Seq<bool>;
+type Permission = Map<Address, PermissionAtom>;
+type PermissionAugmentation = Map<ChannelIndex, Seq<Permission>>;
+
+spec fn valid_permission(k_split: int, perm: Permission) -> bool
+    recommends k_split > 0
+{
+    forall |addr: Address| (#[trigger] perm[addr]).len() == k_split
+}
+
+/**
+ * Condition for two permissions to be considered disjoint
+ */
+spec fn disjoint_permissions(k_split: int, perm1: Permission, perm2: Permission) -> bool
+    recommends
+        k_split > 0,
+        valid_permission(k_split, perm1),
+        valid_permission(k_split, perm2),
+{
+    forall |addr: Address, i: int| 0 <= i < k_split ==> !(#[trigger] perm1[addr][i] && #[trigger] perm2[addr][i])
+}
+
+/**
+ * (Disjoint) union of a list of permissions
+ */
+spec fn union_permissions(k_split: int, perms: Seq<Permission>) -> Permission
+    recommends
+        k_split > 0,
+        perms.len() > 0,
+        forall |i: int| 0 <= i < perms.len() ==> valid_permission(k_split, #[trigger] perms[i]),
+
+        // mutually disjoint
+        forall |i: int, j: int| 0 <= i < perms.len() && 0 <= j < perms.len() && i != j ==> disjoint_permissions(k_split, perms[i], perms[j]),
+{
+    Map::new(|addr: Address| true, |addr: Address| Seq::new(perms[0][addr].len(), |i: int| exists |j: int| 0 <= j < perms.len() ==> (#[trigger] perms[j])[addr][i]))
+}
+
+/**
+ * Condition for perm1 to contain perm2
+ */
+spec fn contains_permission(k_split: int, perm1: Permission, perm2: Permission) -> bool
+    recommends
+        k_split > 0,
+        valid_permission(k_split, perm1),
+        valid_permission(k_split, perm2),
+{
+    forall |addr: Address, i: int| 0 <= i < perm1[addr].len() ==> (#[trigger] perm2[addr][i] ==> #[trigger] perm1[addr][i])
+}
+
+spec fn valid_permission_augmentation(k_split: int, graph: Graph, config: Configuration, aug: PermissionAugmentation) -> bool
+    recommends
+        k_split > 0,
+        valid_config(graph, config),
+{
+    // Domain should be exactly the set of channels
+    (forall |channel: ChannelIndex| aug.dom().contains(channel) ==> #[trigger] graph.channels.contains(channel)) &&
+
+    // Each permission should be valid
+    (forall |channel: ChannelIndex| #[trigger] graph.channels.contains(channel) ==>
+        aug[channel].len() == config.channels[channel].len() &&
+        forall |i: int| 0 <= i < aug[channel].len() ==> valid_permission(k_split, #[trigger] aug[channel][i])) &&
+
+    // Permissions should be mutually disjoint
+    (forall |channel1: ChannelIndex, channel2: ChannelIndex, i: int, j: int|
+        graph.channels.contains(channel1) && graph.channels.contains(channel2) &&
+        0 <= i < aug[channel1].len() && 0 <= j < aug[channel2].len() &&
+        (channel1 != channel2 || i != j) ==>
+        disjoint_permissions(k_split, aug[channel1][i], aug[channel2][j]))
+}
+
+spec fn consistent_transition(
+    k_split: int,
+    graph: Graph,
+    op: OperatorIndex,
+    config1: Configuration, aug1: PermissionAugmentation,
+    config2: Configuration, aug2: PermissionAugmentation,
+) -> bool
+    recommends
+        k_split > 0,
+        valid_config(graph, config1),
+        valid_config(graph, config2),
+{
+    let inputs = match config1.operators[op] {
+        Operator::NonMemory { state } => state_inputs(op, state),
+        Operator::Read { address, sync, output } => seq![address, sync],
+        Operator::Write { address, value, sync, output } => seq![address, value, sync],
+    };
+
+    let outputs = match config1.operators[op] {
+        Operator::NonMemory { state } => state_outputs(op, state),
+        Operator::Read { address, sync, output } => seq![output],
+        Operator::Write { address, value, sync, output } => seq![output],
+    };
+
+    let input_perms = Seq::new(inputs.len(), |i: int| aug1[inputs[i]][0]);
+    let output_perms = Seq::new(outputs.len(), |i: int| aug2[outputs[i]].last());
+
+    config2 == step(graph, config1, op) &&
+    valid_permission_augmentation(k_split, graph, config1, aug1) &&
+    valid_permission_augmentation(k_split, graph, config2, aug2) &&
+
+    // Three cases:
+    // 1. channel not in inputs or outputs
+    // 2. channel in inputs only
+    // 3. channel in outputs only
+    // 4. channel in both inputs and outputs
+
+    // The permissions are unchanged in case 1
+    (forall |channel: ChannelIndex|
+        #[trigger] graph.channels.contains(channel) &&
+        !inputs.contains(channel) &&
+        !outputs.contains(channel) ==>
+        aug1[channel] == aug2[channel]
+    ) &&
+
+    // Case 2
+    (forall |channel: ChannelIndex|
+        #[trigger] graph.channels.contains(channel) &&
+        inputs.contains(channel) &&
+        !outputs.contains(channel) ==>
+        aug2[channel].len() == aug1[channel].len() - 1 &&
+        aug2[channel] =~= aug1[channel].skip(1)
+    ) &&
+
+    // Case 3
+    (forall |channel: ChannelIndex|
+        #[trigger] graph.channels.contains(channel) &&
+        !inputs.contains(channel) &&
+        outputs.contains(channel) ==>
+        aug2[channel].len() == aug1[channel].len() + 1 &&
+        aug2[channel].take(aug2[channel].len() - 1 as int) =~= aug1[channel]
+    ) &&
+
+    // Case 4
+    (forall |channel: ChannelIndex|
+        #[trigger] graph.channels.contains(channel) &&
+        inputs.contains(channel) &&
+        outputs.contains(channel) ==>
+        aug2[channel].len() == aug1[channel].len() &&
+        aug2[channel].take(aug2[channel].len() - 1 as int) =~= aug1[channel].skip(1)
+    ) &&
+
+    // Union of input perms is less than equal to the union of output perms
+    contains_permission(k_split, union_permissions(k_split, input_perms), union_permissions(k_split, output_perms))
+}
+
 /**
  * Stepping a valid configuration gives a valid configuration
  */
-proof fn step_valid(graph: Graph, config: Configuration, op: OperatorIndex)
+proof fn lemma_step_valid(graph: Graph, config: Configuration, op: OperatorIndex)
     requires
         valid_config(graph, config),
         fireable(graph, config, op),
@@ -270,14 +431,13 @@ proof fn step_valid(graph: Graph, config: Configuration, op: OperatorIndex)
  * 
  * i.e. without memory operators, dataflow graph execution is locally confluent.
  */
-proof fn step_non_memory_commute(graph: Graph, config: Configuration, op1: OperatorIndex, op2: OperatorIndex)
+proof fn lemma_step_non_memory_commute(graph: Graph, config: Configuration, op1: OperatorIndex, op2: OperatorIndex)
     requires
         valid_config(graph, config),
         fireable(graph, config, op1),
         fireable(graph, config, op2),
         op1 != op2,
-        is_non_memory(graph, config, op1),
-        is_non_memory(graph, config, op2),
+        is_non_memory(graph, config, op1) || is_non_memory(graph, config, op2),
 
     ensures
         fireable(graph, step(graph, config, op1), op2),
@@ -289,8 +449,8 @@ proof fn step_non_memory_commute(graph: Graph, config: Configuration, op1: Opera
     let step_1_2 = step(graph, step(graph, config, op1), op2);
     let step_2_1 = step(graph, step(graph, config, op2), op1);
 
-    let op1_init_state = config.operators[op1].get_NonMemory_state();
-    let op2_init_state = config.operators[op2].get_NonMemory_state();
+    let op1_init_state = get_op_state(graph, config, op1);
+    let op2_init_state = get_op_state(graph, config, op2);
 
     let op1_inputs = state_inputs(op1, op1_init_state);
     let op1_outputs = state_outputs(op1, op1_init_state);
@@ -322,6 +482,40 @@ proof fn step_non_memory_commute(graph: Graph, config: Configuration, op1: Opera
 
     assert(step_1_2.operators =~= step_2_1.operators);
     assert(step_1_2.channels =~~= step_2_1.channels);
+}
+
+proof fn lemma_switch(
+    k_split: int,
+    graph: Graph,
+    op1: OperatorIndex, op2: OperatorIndex,
+    config1: Configuration, aug1: PermissionAugmentation,
+    config2: Configuration, aug2: PermissionAugmentation,
+    config3: Configuration, aug3: PermissionAugmentation,
+)
+    requires
+        k_split > 0,
+        valid_config(graph, config1),
+        valid_config(graph, config2),
+        valid_config(graph, config3),
+
+        op1 != op2,
+
+        fireable(graph, config1, op1),
+        fireable(graph, config1, op2),
+
+        // config1 -> config2 -> config3 is a consistent trace
+        consistent_transition(k_split, graph, op1, config1, aug1, config2, aug2),
+        consistent_transition(k_split, graph, op2, config2, aug2, config3, aug3),
+
+    ensures
+        step(graph, step(graph, config1, op2), op1) == config3,
+{
+    if is_non_memory(graph, config1, op1) || is_non_memory(graph, config1, op2) {
+        lemma_step_non_memory_commute(graph, config1, op1, op2);
+    } else {
+        // TODO
+        assume(false);
+    }
 }
 
 } // verus!

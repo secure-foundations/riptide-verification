@@ -77,16 +77,12 @@ spec fn valid_config(graph: Graph, config: Configuration) -> bool
     // Inputs and outputs should be different channels
     (forall |op: OperatorIndex, state: State, i: int, j: int|
         graph.operators.contains(op) &&
-        0 <= i < state_inputs(op, state).len() &&
-        0 <= j < state_inputs(op, state).len() &&
-        i != j ==>
+        0 <= i < j < state_inputs(op, state).len() ==>
         state_inputs(op, state)[i] != state_inputs(op, state)[j]) &&
 
     (forall |op: OperatorIndex, state: State, i: int, j: int|
         graph.operators.contains(op) &&
-        0 <= i < state_outputs(op, state).len() &&
-        0 <= j < state_outputs(op, state).len() &&
-        i != j ==>
+        0 <= i < j < state_outputs(op, state).len() ==>
         state_outputs(op, state)[i] != state_outputs(op, state)[j]) &&
 
     // Inputs and outputs are valid channel indices
@@ -292,9 +288,19 @@ spec fn union_permissions(k_split: int, perms: Seq<Permission>) -> Permission
         forall |i: int| 0 <= i < perms.len() ==> valid_permission(k_split, #[trigger] perms[i]),
 
         // mutually disjoint
-        forall |i: int, j: int| 0 <= i < perms.len() && 0 <= j < perms.len() && i != j ==> disjoint_permissions(k_split, perms[i], perms[j]),
+        forall |i: int, j: int| 0 <= i < j < perms.len() ==> disjoint_permissions(k_split, perms[i], perms[j]),
 {
     Map::new(|addr: Address| true, |addr: Address| Seq::new(perms[0][addr].len(), |i: int| exists |j: int| 0 <= j < perms.len() ==> (#[trigger] perms[j])[addr][i]))
+}
+
+spec fn has_read_permission(k_split: int, perm: Permission, addr: Address) -> bool
+{
+    exists |i: int| 0 <= i < k_split ==> perm[addr][i]
+}
+
+spec fn has_write_permission(k_split: int, perm: Permission, addr: Address) -> bool
+{
+    forall |i: int| 0 <= i < k_split ==> perm[addr][i]
 }
 
 /**
@@ -330,7 +336,7 @@ spec fn valid_permission_augmentation(k_split: int, graph: Graph, config: Config
         disjoint_permissions(k_split, aug[channel1][i], aug[channel2][j]))
 }
 
-spec fn consistent_transition(
+spec fn consistent_step(
     k_split: int,
     graph: Graph,
     op: OperatorIndex,
@@ -403,7 +409,30 @@ spec fn consistent_transition(
     ) &&
 
     // Union of input perms is less than equal to the union of output perms
-    contains_permission(k_split, union_permissions(k_split, input_perms), union_permissions(k_split, output_perms))
+    contains_permission(k_split, union_permissions(k_split, input_perms), union_permissions(k_split, output_perms)) &&
+
+    // If the operator is a read/write, we require suitable permissions
+    (match config1.operators[op] {
+        Operator::Read { address, sync, output } => {
+            let address_value = config1.channels[address][0];
+            let address_perm = aug1[address][0];
+            let sync_perm = aug1[sync][0];
+            has_read_permission(k_split, address_perm, address_value) ||
+            has_read_permission(k_split, sync_perm, address_value)
+        },
+
+        Operator::Write { address, value, sync, output } => {
+            let address_value = config1.channels[address][0];
+            let address_perm = aug1[address][0];
+            let value_perm = aug1[value][0];
+            let sync_perm = aug1[sync][0];
+            has_write_permission(k_split, address_perm, address_value) ||
+            has_write_permission(k_split, value_perm, address_value) ||
+            has_write_permission(k_split, sync_perm, address_value)
+        },
+
+        _ => true,
+    })
 }
 
 /**
@@ -484,7 +513,7 @@ proof fn lemma_step_non_memory_commute(graph: Graph, config: Configuration, op1:
     assert(step_1_2.channels =~~= step_2_1.channels);
 }
 
-proof fn lemma_switch(
+proof fn lemma_consistent_step_commute(
     k_split: int,
     graph: Graph,
     op1: OperatorIndex, op2: OperatorIndex,
@@ -504,8 +533,8 @@ proof fn lemma_switch(
         fireable(graph, config1, op2),
 
         // config1 -> config2 -> config3 is a consistent trace
-        consistent_transition(k_split, graph, op1, config1, aug1, config2, aug2),
-        consistent_transition(k_split, graph, op2, config2, aug2, config3, aug3),
+        consistent_step(k_split, graph, op1, config1, aug1, config2, aug2),
+        consistent_step(k_split, graph, op2, config2, aug2, config3, aug3),
 
     ensures
         step(graph, step(graph, config1, op2), op1) == config3,

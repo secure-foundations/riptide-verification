@@ -10,6 +10,8 @@ type Channel = Seq<Value>;
 
 type Address = int;
 
+spec const WRITE_DEFAULT_OUTPUT: int = 0;
+
 /** Three types of operators:
  * 1. Normal operators (stateful operators with I/O behaviors determined by the state), no memory access
  * 2. Read operator
@@ -73,6 +75,8 @@ spec fn valid_config(graph: Graph, config: Configuration) -> bool
 
     config.operators.dom() =~= graph.operators &&
     config.channels.dom() =~= graph.channels &&
+
+    (forall |addr: Address| config.memory.dom().contains(addr)) &&
 
     // Inputs and outputs should be different channels
     (forall |op: OperatorIndex, state: State, i: int, j: int|
@@ -239,7 +243,7 @@ spec fn step(graph: Graph, config: Configuration, op: OperatorIndex) -> Configur
         Operator::Write { address, value, sync, output } => {
             let address_value = config.channels[address][0];
             let value_value = config.channels[value][0];
-            let output_value = 1;
+            let output_value = WRITE_DEFAULT_OUTPUT;
 
             let input_updated_channels = config.channels
                 .insert(address, config.channels[address].skip(1))
@@ -290,12 +294,12 @@ spec fn union_permissions(k_split: int, perms: Seq<Permission>) -> Permission
         // mutually disjoint
         forall |i: int, j: int| 0 <= i < j < perms.len() ==> disjoint_permissions(k_split, perms[i], perms[j]),
 {
-    Map::new(|addr: Address| true, |addr: Address| Seq::new(perms[0][addr].len(), |i: int| exists |j: int| 0 <= j < perms.len() ==> (#[trigger] perms[j])[addr][i]))
+    Map::new(|addr: Address| true, |addr: Address| Seq::new(perms[0][addr].len(), |i: int| exists |j: int| 0 <= j < perms.len() && #[trigger] perms[j][addr][i]))
 }
 
 spec fn has_read_permission(k_split: int, perm: Permission, addr: Address) -> bool
 {
-    exists |i: int| 0 <= i < k_split ==> perm[addr][i]
+    exists |i: int| 0 <= i < k_split && perm[addr][i]
 }
 
 spec fn has_write_permission(k_split: int, perm: Permission, addr: Address) -> bool
@@ -348,17 +352,8 @@ spec fn consistent_step(
         valid_config(graph, config1),
         valid_config(graph, config2),
 {
-    let inputs = match config1.operators[op] {
-        Operator::NonMemory { state } => state_inputs(op, state),
-        Operator::Read { address, sync, output } => seq![address, sync],
-        Operator::Write { address, value, sync, output } => seq![address, value, sync],
-    };
-
-    let outputs = match config1.operators[op] {
-        Operator::NonMemory { state } => state_outputs(op, state),
-        Operator::Read { address, sync, output } => seq![output],
-        Operator::Write { address, value, sync, output } => seq![output],
-    };
+    let inputs = state_inputs(op, get_op_state(graph, config1, op));
+    let outputs = state_outputs(op, get_op_state(graph, config1, op));
 
     let input_perms = Seq::new(inputs.len(), |i: int| aug1[inputs[i]][0]);
     let output_perms = Seq::new(outputs.len(), |i: int| aug2[outputs[i]].last());
@@ -417,8 +412,7 @@ spec fn consistent_step(
             let address_value = config1.channels[address][0];
             let address_perm = aug1[address][0];
             let sync_perm = aug1[sync][0];
-            has_read_permission(k_split, address_perm, address_value) ||
-            has_read_permission(k_split, sync_perm, address_value)
+            has_read_permission(k_split, union_permissions(k_split, input_perms), address_value)
         },
 
         Operator::Write { address, value, sync, output } => {
@@ -426,9 +420,7 @@ spec fn consistent_step(
             let address_perm = aug1[address][0];
             let value_perm = aug1[value][0];
             let sync_perm = aug1[sync][0];
-            has_write_permission(k_split, address_perm, address_value) ||
-            has_write_permission(k_split, value_perm, address_value) ||
-            has_write_permission(k_split, sync_perm, address_value)
+            has_write_permission(k_split, union_permissions(k_split, input_perms), address_value)
         },
 
         _ => true,
@@ -466,7 +458,10 @@ proof fn lemma_step_non_memory_commute(graph: Graph, config: Configuration, op1:
         fireable(graph, config, op1),
         fireable(graph, config, op2),
         op1 != op2,
-        is_non_memory(graph, config, op1) || is_non_memory(graph, config, op2),
+        
+        is_non_memory(graph, config, op1) ||
+        is_non_memory(graph, config, op2) ||
+        (config.operators[op1].is_Read() && config.operators[op2].is_Read()),
 
     ensures
         fireable(graph, step(graph, config, op1), op2),
@@ -539,11 +534,205 @@ proof fn lemma_consistent_step_commute(
     ensures
         step(graph, step(graph, config1, op2), op1) == config3,
 {
-    if is_non_memory(graph, config1, op1) || is_non_memory(graph, config1, op2) {
+    if is_non_memory(graph, config1, op1) || is_non_memory(graph, config1, op2) || (config1.operators[op1].is_Read() && config1.operators[op2].is_Read()){
         lemma_step_non_memory_commute(graph, config1, op1, op2);
     } else {
-        // TODO
-        assume(false);
+        let step_1 = step(graph, config1, op1);
+        let step_2 = step(graph, config1, op2);
+        let step_1_2 = step(graph, step(graph, config1, op1), op2);
+        let step_2_1 = step(graph, step(graph, config1, op2), op1);
+
+        let op1_init_state = get_op_state(graph, config1, op1);
+        let op2_init_state = get_op_state(graph, config1, op2);
+
+        let op1_inputs = state_inputs(op1, op1_init_state);
+        let op1_outputs = state_outputs(op1, op1_init_state);
+        let op2_inputs = state_inputs(op2, op2_init_state);
+        let op2_outputs = state_outputs(op2, op2_init_state);
+
+        let op1_input_values_in_config = Seq::new(op1_inputs.len(), |i: int| config1.channels[op1_inputs[i]][0]);
+        let op1_input_values_in_step_2 = Seq::new(op1_inputs.len(), |i: int| step_2.channels[op1_inputs[i]][0]);
+        
+        let op2_input_values_in_config = Seq::new(op2_inputs.len(), |i: int| config1.channels[op2_inputs[i]][0]);
+        let op2_input_values_in_step_1 = Seq::new(op2_inputs.len(), |i: int| step_1.channels[op2_inputs[i]][0]);
+        let op2_input_perms_in_config = Seq::new(op2_inputs.len(), |i: int| aug1[op2_inputs[i]][0]);
+        let op2_input_perms_in_step_1 = Seq::new(op2_inputs.len(), |i: int| aug2[op2_inputs[i]][0]);
+
+        assert(op1_input_values_in_config == op1_input_values_in_step_2);
+        assert(op2_input_values_in_config == op2_input_values_in_step_1);
+        assert(op2_input_perms_in_config == op2_input_perms_in_step_1);
+        
+        if (config1.operators[op1].is_Read() && config1.operators[op2].is_Write()) {
+            // assert(op1_input_values_in_config == op1_input_values_in_step_2);
+            // assert(op2_input_values_in_config == op2_input_values_in_step_1);
+            // assert(op2_input_perms_in_config == op2_input_perms_in_step_1);
+            // assert(state_inputs(op2, get_op_state(graph, config2, op2)) =~= state_inputs(op2, get_op_state(graph, config1, op2)));
+
+            let op1_address = op1_input_values_in_config[0];
+            let op2_address = op2_input_values_in_config[0];
+
+            let op1_address_perm = aug1[op1_inputs[0]][0];
+            let op1_sync_perm = aug1[op1_inputs[1]][0];
+            let op1_input_perm_union = union_permissions(k_split, seq![op1_address_perm, op1_sync_perm]);
+
+            let op2_address_perm = aug1[op2_inputs[0]][0];
+            let op2_value_perm = aug1[op2_inputs[1]][0];
+            let op2_sync_perm = aug1[op2_inputs[2]][0];
+            let op2_input_perm_union = union_permissions(k_split, seq![op2_address_perm, op2_value_perm, op2_sync_perm]);
+
+            assert(seq![op1_address_perm, op1_sync_perm] =~= Seq::new(op1_inputs.len(), |i: int| aug1[op1_inputs[i]][0]));
+            assert(seq![op2_address_perm, op2_value_perm, op2_sync_perm] =~= Seq::new(op2_inputs.len(), |i: int| aug1[op2_inputs[i]][0]));
+
+            assert(has_read_permission(k_split, op1_input_perm_union, op1_address));
+            assert(has_write_permission(k_split, op2_input_perm_union, op2_address));
+
+            // assume(disjoint_permissions(k_split, op1_input_perm_union, op2_input_perm_union));
+
+            assert(disjoint_permissions(k_split, op1_input_perm_union, op2_input_perm_union)) by {
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_address_perm));
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_value_perm));
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_sync_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_address_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_value_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_sync_perm));
+
+                // assert forall |addr: Address, i: int|
+                //     0 <= i < k_split
+                // implies
+                //     !(op1_input_perm_union[addr][i] && op2_input_perm_union[addr][i]) by
+                // {
+                //     // if op1_input_perm_union[addr][i] {
+                //     //     assert(op1_address_perm[addr][i] || op1_sync_perm[addr][i]);
+                //     //     assert(!op2_address_perm[addr][i] && !op2_value_perm[addr][i] && !op2_sync_perm[addr][i]);
+                //     // } else {
+                //     //     assume(false);
+                //     // }
+                // }
+            }
+
+            assert(op1_address != op2_address) by {
+                if op1_address == op2_address {
+                    // assert(forall |i: int| 0 <= i < k_split ==> op2_input_perm_union[op1_address][i]);
+                    assert(forall |i: int| 0 <= i < k_split ==> !(op2_input_perm_union[op1_address][i] && op1_input_perm_union[op1_address][i]));
+                    // assert(exists |i: int| 0 <= i < k_split && op1_input_perm_union[op1_address][i]);
+                    assert(false);
+                }
+            }
+
+            // let op1_output_values_in_step_1 = Seq::new(op1_outputs.len(), |i: int| step_1.channels[op1_outputs[i]][0]);
+            // let op1_output_values_in_step_2_1 = Seq::new(op1_outputs.len(), |i: int| step_2_1.channels[op1_outputs[i]][0]);
+            // assert(op1_output_values_in_step_1.len() == 1);
+            // assert(op1_output_values_in_step_2_1.len() == 1);
+            // assert(step_2.memory == config1.memory.insert(op2_address, op2_input_values_in_config[1]));
+            // assert(config1.memory[op1_address] == config1.memory.insert(op2_address, op2_input_values_in_config[1])[op1_address]);
+        } else if (config1.operators[op1].is_Write() && config1.operators[op2].is_Read()) {
+            // assert(op1_input_values_in_config == op1_input_values_in_step_2);
+            // assert(op2_input_values_in_config == op2_input_values_in_step_1);
+            // assert(op2_input_perms_in_config == op2_input_perms_in_step_1);
+            // assert(state_inputs(op2, get_op_state(graph, config2, op2)) =~= state_inputs(op2, get_op_state(graph, config1, op2)));
+
+            let op1_address = op1_input_values_in_config[0];
+            let op2_address = op2_input_values_in_config[0];
+
+            let op1_address_perm = aug1[op1_inputs[0]][0];
+            let op1_value_perm = aug1[op1_inputs[1]][0];
+            let op1_sync_perm = aug1[op1_inputs[2]][0];
+            let op1_input_perm_union = union_permissions(k_split, seq![op1_address_perm, op1_value_perm, op1_sync_perm]);
+
+            let op2_address_perm = aug1[op2_inputs[0]][0];
+            let op2_sync_perm = aug1[op2_inputs[1]][0];
+            let op2_input_perm_union = union_permissions(k_split, seq![op2_address_perm, op2_sync_perm]);
+
+            assert(seq![op1_address_perm, op1_value_perm, op1_sync_perm] =~= Seq::new(op1_inputs.len(), |i: int| aug1[op1_inputs[i]][0]));
+            assert(seq![op2_address_perm, op2_sync_perm] =~= Seq::new(op2_inputs.len(), |i: int| aug1[op2_inputs[i]][0]));
+
+            assert(has_write_permission(k_split, op1_input_perm_union, op1_address));
+            assert(has_read_permission(k_split, op2_input_perm_union, op2_address));
+
+            assert(disjoint_permissions(k_split, op1_input_perm_union, op2_input_perm_union)) by {
+                assert(disjoint_permissions(k_split, op2_address_perm, op1_address_perm));
+                assert(disjoint_permissions(k_split, op2_address_perm, op1_value_perm));
+                assert(disjoint_permissions(k_split, op2_address_perm, op1_sync_perm));
+                assert(disjoint_permissions(k_split, op2_sync_perm, op1_address_perm));
+                assert(disjoint_permissions(k_split, op2_sync_perm, op1_value_perm));
+                assert(disjoint_permissions(k_split, op2_sync_perm, op1_sync_perm));
+            }
+
+            assert(op1_address != op2_address) by {
+                if op1_address == op2_address {
+                    // assert(forall |i: int| 0 <= i < k_split ==> op2_input_perm_union[op1_address][i]);
+                    assert(forall |i: int| 0 <= i < k_split ==> !(op2_input_perm_union[op1_address][i] && op1_input_perm_union[op1_address][i]));
+                    // assert(exists |i: int| 0 <= i < k_split && op1_input_perm_union[op1_address][i]);
+                    assert(false);
+                }
+            }
+
+            // assume(false);
+            // let op1_output_values_in_step_1 = Seq::new(op1_outputs.len(), |i: int| step_1.channels[op1_outputs[i]][0]);
+            // let op1_output_values_in_step_2_1 = Seq::new(op1_outputs.len(), |i: int| step_2_1.channels[op1_outputs[i]][0]);
+            // assert(op1_output_values_in_step_1.len() == 1);
+            // assert(op1_output_values_in_step_2_1.len() == 1);
+            // assert(step_2.memory == config1.memory.insert(op2_address, op2_input_values_in_config[1]));
+            // assert(config1.memory[op1_address] == config1.memory.insert(op2_address, op2_input_values_in_config[1])[op1_address]);
+        } else if (config1.operators[op1].is_Write() && config1.operators[op2].is_Write()) {
+            let op1_address = op1_input_values_in_config[0];
+            let op2_address = op2_input_values_in_config[0];
+
+            let op1_address_perm = aug1[op1_inputs[0]][0];
+            let op1_value_perm = aug1[op1_inputs[1]][0];
+            let op1_sync_perm = aug1[op1_inputs[2]][0];
+            let op1_input_perm_union = union_permissions(k_split, seq![op1_address_perm, op1_value_perm, op1_sync_perm]);
+
+            let op2_address_perm = aug1[op2_inputs[0]][0];
+            let op2_value_perm = aug1[op2_inputs[1]][0];
+            let op2_sync_perm = aug1[op2_inputs[2]][0];
+            let op2_input_perm_union = union_permissions(k_split, seq![op2_address_perm, op2_value_perm, op2_sync_perm]);
+
+            assert(seq![op1_address_perm, op1_value_perm, op1_sync_perm] =~= Seq::new(op1_inputs.len(), |i: int| aug1[op1_inputs[i]][0]));
+            assert(seq![op2_address_perm, op2_value_perm, op2_sync_perm] =~= Seq::new(op2_inputs.len(), |i: int| aug1[op2_inputs[i]][0]));
+
+            assert(has_write_permission(k_split, op1_input_perm_union, op1_address));
+            assert(has_write_permission(k_split, op2_input_perm_union, op2_address));
+
+            assert(disjoint_permissions(k_split, op1_input_perm_union, op2_input_perm_union)) by {
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_address_perm));
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_value_perm));
+                assert(disjoint_permissions(k_split, op1_address_perm, op2_sync_perm));
+                assert(disjoint_permissions(k_split, op1_value_perm, op2_address_perm));
+                assert(disjoint_permissions(k_split, op1_value_perm, op2_value_perm));
+                assert(disjoint_permissions(k_split, op1_value_perm, op2_sync_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_address_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_value_perm));
+                assert(disjoint_permissions(k_split, op1_sync_perm, op2_sync_perm));
+            }
+
+            assert(op1_address != op2_address) by {
+                if op1_address == op2_address {
+                    // assert(forall |i: int| 0 <= i < k_split ==> op1_input_perm_union[op1_address][i]);
+                    // assert(forall |i: int| 0 <= i < k_split ==> op2_input_perm_union[op1_address][i]);
+                    // assert(forall |i: int| 0 <= i < k_split ==> !(op2_input_perm_union[op1_address][i] && op1_input_perm_union[op1_address][i]));
+                    // // assert(exists |i: int| 0 <= i < k_split && op1_input_perm_union[op1_address][i]);
+
+                    assert forall |i: int|
+                        0 <= i < k_split
+                    implies
+                        op1_input_perm_union[op1_address][i] && false by
+                    {
+                        assert(op1_input_perm_union[op1_address][i]);
+                        assert(op2_input_perm_union[op1_address][i]);
+                        assert(!(op1_input_perm_union[op1_address][i] && op2_input_perm_union[op1_address][i]));
+                    }
+
+                    let trigger = op1_input_perm_union[op1_address][0];
+
+                    assert(false);
+                }
+            }
+        }
+
+        assert(step_1_2.operators =~= step_2_1.operators);
+        assert(step_1_2.memory =~= step_2_1.memory);
+        assert(step_1_2.channels =~~= step_2_1.channels);
     }
 }
 

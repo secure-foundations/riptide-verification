@@ -49,7 +49,6 @@ impl Permission {
      */
     pub open spec fn union_of(perms: Seq<Permission>) -> Permission
         recommends
-            perms.len() > 0,
             forall |i: int| 0 <= i < perms.len() ==> (#[trigger] perms[i]).valid(),
 
             // mutually disjoint
@@ -204,16 +203,52 @@ pub proof fn lemma_step_independent_input_permissions(
     assert(aug1.get_op_input_permissions(config1, op2) =~= aug2.get_op_input_permissions(config2, op2));
 }
 
+// Permission {
+//     access: Map::total(|addr: Address|
+//         Seq::new(permission_write_split(),
+//             |i: int| exists |j: int| 0 <= j < perms.len() && #[trigger] perms[j].access[addr][i])),
+// }
+
+/**
+ * Lemma: Let perms1 and perms2 be two lists of permissions.
+ * If any permission in perms1 is disjoint from any permission
+ * in perms2, then the union of perms1 is disjoint from the
+ * union of perms2.
+ */
 proof fn lemma_mutually_disjoint_union(perms1: Seq<Permission>, perms2: Seq<Permission>)
     requires
+        perms1.len() > 0,
+        perms2.len() > 0,
+
         forall |i: int, j: int|
+            #![trigger perms1[i], perms2[j]]
             0 <= i < perms1.len() && 0 <= j < perms2.len() ==>
             perms1[i].disjoint(perms2[j])
 
     ensures
         Permission::union_of(perms1).disjoint(Permission::union_of(perms2))
 {
-    assume(false);
+    // assert forall |addr: Address, i: int|
+    //     0 <= i < permission_write_split()
+    // implies
+    //     !(Permission::union_of(perms1).access[addr][i] && Permission::union_of(perms2).access[addr][i]) by
+    // {
+    //     if Permission::union_of(perms1).access[addr][i] {
+    //         // Exists by definition of Permission::union_of
+    //         let j = choose |j: int| 0 <= j < perms1.len() && #[trigger] perms1[j].access[addr][i];
+    //         // assert forall |k: int| 0 <= k < perms2.len() implies !(#[trigger] perms2[k]).access[addr][i] by {
+    //         //     assert(perms1[j].disjoint(perms2[k]));
+    //         // }
+    //         assert(!Permission::union_of(perms2).access[addr][i]);
+    //     } else if Permission::union_of(perms2).access[addr][i] {
+    //         let j = choose |j: int| 0 <= j < perms2.len() && #[trigger] perms2[j].access[addr][i];
+    //         assert forall |k: int| 0 <= k < perms1.len() implies !(#[trigger] perms1[k]).access[addr][i] by {
+    //             assert(perms2[j].disjoint(perms1[k]));
+    //         }
+    //         assert(!Permission::union_of(perms1).access[addr][i]);
+    //     }
+    // }
+    // assume(false);
 }
 
 /**

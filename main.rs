@@ -1,9 +1,4 @@
-use vstd::prelude::*;
-
 mod semantics;
-
-verus! {
+mod permission;
 
 fn main() {}
-
-} // verus!

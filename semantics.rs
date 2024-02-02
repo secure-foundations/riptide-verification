@@ -508,6 +508,10 @@ proof fn lemma_step_non_memory_commute(graph: Graph, config: Configuration, op1:
     assert(step_1_2.channels =~~= step_2_1.channels);
 }
 
+/**
+ * Lemma: If we have two consistent steps with both operators fireable in the initial config,
+ * then their order of execution can be swapped without changing the result.
+ */
 proof fn lemma_consistent_step_commute(
     k_split: int,
     graph: Graph,

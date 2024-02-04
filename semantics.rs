@@ -252,16 +252,17 @@ impl Configuration {
 
         ensures
             self.step(op).valid(),
+            self.graph =~~= self.step(op).graph,
     {
         reveal(Configuration::step);
     }
 
     /**
      * Lemma: If two different operators op1 and op2 are fireable in a config
-     * then firing either one of them would not change the input and fireability
+     * then firing either one of them would not change the input, output, state, and fireability
      * of the other.
      */
-    pub proof fn lemma_step_independent_inputs(self, op1: OperatorIndex, op2: OperatorIndex)
+    pub proof fn lemma_step_independence(self, op1: OperatorIndex, op2: OperatorIndex)
         requires
             self.valid(),
             self.fireable(op1),
@@ -271,14 +272,22 @@ impl Configuration {
         ensures
             self.step(op1).fireable(op2),
             self.step(op2).fireable(op1),
+            self.get_op_input_channels(op1) =~= self.step(op2).get_op_input_channels(op1),
+            self.get_op_input_channels(op2) =~= self.step(op1).get_op_input_channels(op2),
+            self.get_op_output_channels(op1) =~= self.step(op2).get_op_output_channels(op1),
+            self.get_op_output_channels(op2) =~= self.step(op1).get_op_output_channels(op2),
+            self.operators[op1] == self.step(op2).operators[op1],
+            self.operators[op2] == self.step(op1).operators[op2],
             self.get_op_input_values(op1) =~= self.step(op2).get_op_input_values(op1),
             self.get_op_input_values(op2) =~= self.step(op1).get_op_input_values(op2),
     {
         reveal(Configuration::step);
+        assert(self.operators[op1] == self.step(op2).operators[op1]);
+        assert(self.operators[op2] == self.step(op1).operators[op2]);
         assert(self.step(op1).fireable(op2));
         assert(self.step(op2).fireable(op1));
-        assert(self.get_op_input_values(op1) == self.step(op2).get_op_input_values(op1));
-        assert(self.get_op_input_values(op2) == self.step(op1).get_op_input_values(op2));
+        // assert(self.get_op_input_values(op1) == self.step(op2).get_op_input_values(op1));
+        // assert(self.get_op_input_values(op2) == self.step(op1).get_op_input_values(op2));
     }
 
 
@@ -303,7 +312,7 @@ impl Configuration {
         ensures
             self.step(op1).step(op2) == self.step(op2).step(op1),
     {
-        self.lemma_step_independent_inputs(op1, op2);
+        self.lemma_step_independence(op1, op2);
 
         assert(self.step(op1).step(op2) == self.step(op2).step(op1)) by {
             reveal(Configuration::step);

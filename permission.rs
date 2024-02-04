@@ -154,7 +154,7 @@ pub open spec fn consistent_step(
         #[trigger] config1.is_channel(channel) ==> {
             if !inputs.contains(channel) && !outputs.contains(channel) {
                 // The permissions are unchanged in case 1
-                aug1.aug_map[channel] =~= aug2.aug_map[channel]
+                aug2.aug_map[channel] =~= aug1.aug_map[channel]
             } else if inputs.contains(channel) && !outputs.contains(channel) {
                 // Case 2
                 // aug2.aug_map[channel].len() == aug1.aug_map[channel].len() - 1 &&
@@ -183,7 +183,7 @@ pub open spec fn consistent_step(
 }
 
 /**
- * Lemma: Similar to lemma_step_independent_inputs, but for input permissions
+ * Lemma: Similar to lemma_step_independence, but for input permissions
  */
 pub proof fn lemma_step_independent_input_permissions(
     op1: OperatorIndex, op2: OperatorIndex,
@@ -227,29 +227,7 @@ proof fn lemma_mutually_disjoint_union(perms1: Seq<Permission>, perms2: Seq<Perm
 
     ensures
         Permission::union_of(perms1).disjoint(Permission::union_of(perms2))
-{
-    // assert forall |addr: Address, i: int|
-    //     0 <= i < permission_write_split()
-    // implies
-    //     !(Permission::union_of(perms1).access[addr][i] && Permission::union_of(perms2).access[addr][i]) by
-    // {
-    //     if Permission::union_of(perms1).access[addr][i] {
-    //         // Exists by definition of Permission::union_of
-    //         let j = choose |j: int| 0 <= j < perms1.len() && #[trigger] perms1[j].access[addr][i];
-    //         // assert forall |k: int| 0 <= k < perms2.len() implies !(#[trigger] perms2[k]).access[addr][i] by {
-    //         //     assert(perms1[j].disjoint(perms2[k]));
-    //         // }
-    //         assert(!Permission::union_of(perms2).access[addr][i]);
-    //     } else if Permission::union_of(perms2).access[addr][i] {
-    //         let j = choose |j: int| 0 <= j < perms2.len() && #[trigger] perms2[j].access[addr][i];
-    //         assert forall |k: int| 0 <= k < perms1.len() implies !(#[trigger] perms1[k]).access[addr][i] by {
-    //             assert(perms2[j].disjoint(perms1[k]));
-    //         }
-    //         assert(!Permission::union_of(perms1).access[addr][i]);
-    //     }
-    // }
-    // assume(false);
-}
+{}
 
 /**
  * Lemma: If both **memory** operators op1 and op2 are fireable in a
@@ -283,7 +261,7 @@ proof fn lemma_consistent_step_disjoint_memory_address(
     ensures
         config1.get_op_input_values(op1)[0].as_address() != config1.get_op_input_values(op2)[0].as_address()
 {
-    config1.lemma_step_independent_inputs(op1, op2);
+    config1.lemma_step_independence(op1, op2);
 
     let op1_inputs = config1.get_op_input_channels(op1);
     let op2_inputs = config1.get_op_input_channels(op2);
@@ -342,6 +320,270 @@ proof fn lemma_consistent_step_disjoint_memory_address(
 }
 
 /**
+ * Returns a valid augmentation aug4 for config1.step(op2)
+ * such that (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
+ * is a consistent trace.
+ */
+spec fn consistent_step_commute_aug4_choice(
+    op1: OperatorIndex, op2: OperatorIndex,
+    config1: Configuration, aug1: PermissionAugmentation,
+    config2: Configuration, aug2: PermissionAugmentation,
+    config3: Configuration, aug3: PermissionAugmentation,
+) -> PermissionAugmentation
+{
+    let inputs = config1.get_op_input_channels(op2);
+    let outputs = config1.get_op_output_channels(op2);
+
+    let input_perms = aug1.get_op_input_permissions(config1, op2);
+    let output_perms = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
+
+    // let input_updated_aug_map = Map::new(
+    //     |channel: ChannelIndex| config1.is_channel(channel),
+    //     |channel: ChannelIndex|
+    //         if inputs.contains(channel) { aug1.aug_map[channel].drop_first() }
+    //         else { aug1.aug_map[channel] }
+    // );
+
+    // let output_updated_aug_map = Map::new(
+    //     |channel: ChannelIndex| config1.is_channel(channel),
+    //     |channel: ChannelIndex|
+    //         if outputs.contains(channel) {
+    //             let output_index = outputs.index_of(channel);
+    //             input_updated_aug_map[channel].push(output_perms[output_index])
+    //         }
+    //         else { input_updated_aug_map[channel] }
+    // );
+
+    let new_aug_map = Map::new(
+        |channel: ChannelIndex| config1.is_channel(channel),
+        |channel: ChannelIndex|
+            if !inputs.contains(channel) && !outputs.contains(channel) {
+                aug1.aug_map[channel]
+            } else if inputs.contains(channel) && !outputs.contains(channel) {
+                aug1.aug_map[channel].drop_first()
+            } else if !inputs.contains(channel) && outputs.contains(channel) {
+                let output_index = outputs.index_of(channel);
+                aug1.aug_map[channel].push(output_perms[output_index])
+            } else {
+                let output_index = outputs.index_of(channel);
+                aug1.aug_map[channel].drop_first().push(output_perms[output_index])
+            }
+    );
+
+    PermissionAugmentation { aug_map: new_aug_map }
+}
+
+// Some random seq fact
+proof fn lemma_seq_drop_last<A>(seq1: Seq<A>, seq2: Seq<A>)
+    requires
+        seq1.len() > 0,
+        seq2.len() > 0,
+        seq1.drop_last() == seq2.drop_last(),
+        seq1.last() == seq2.last(),
+
+    ensures
+        seq1 =~= seq2,
+{
+    assert(seq1.len() == seq1.drop_last().len() + 1);
+    assert(seq2.len() == seq2.drop_last().len() + 1);
+
+    assert forall |i: int|
+        0 <= i < seq1.len()
+    implies
+        seq1[i] == seq2[i] by
+    {
+        if 0 <= i < seq1.drop_last().len() {
+            assert(seq1[i] == seq1.drop_last()[i]);
+            assert(seq2[i] == seq2.drop_last()[i]);
+        }
+    }
+}
+
+/**
+ * Lemma: the augmentation returned by consistent_step_commute_aug4_choice
+ * does make (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
+ * a consistent trace
+ */
+proof fn lemma_consistent_step_commute_aug4_choice(
+    op1: OperatorIndex, op2: OperatorIndex,
+    config1: Configuration, aug1: PermissionAugmentation,
+    config2: Configuration, aug2: PermissionAugmentation,
+    config3: Configuration, aug3: PermissionAugmentation,
+)
+    requires
+        config1.valid(),
+        config2.valid(),
+        config3.valid(),
+        config1.fireable(op1),
+        config1.fireable(op2),
+        op1 != op2,
+
+        // config1 -> config2 -> config3 is a consistent trace
+        consistent_step(op1, config1, aug1, config2, aug2),
+        consistent_step(op2, config2, aug2, config3, aug3),
+
+        // This is left as an assumption
+        config1.step(op2).step(op1) == config3,
+
+    ensures
+        ({
+            let config4 = config1.step(op2);
+            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            
+            consistent_step(op2, config1, aug1, config4, aug4) &&
+            consistent_step(op1, config4, aug4, config3, aug3)
+        }),
+{
+    let config4 = config1.step(op2);
+    let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    
+    config1.lemma_step_valid(op2);
+    config1.lemma_step_independence(op1, op2);
+    config4.lemma_step_valid(op1);
+    config2.lemma_step_valid(op2);
+    
+    assert(aug4.valid(config4)) by {
+        assert(aug4.aug_map.dom() =~= config4.graph.channels);
+        
+        assert forall |channel: ChannelIndex|
+            #[trigger] config4.is_channel(channel)
+        implies
+            aug4.aug_map[channel].len() == config4.channels[channel].len() &&
+            (forall |i: int| 0 <= i < aug4.aug_map[channel].len() ==> (#[trigger] aug4.aug_map[channel][i]).valid()) by
+        {
+            reveal(Configuration::step);
+        }
+
+        assert forall |channel1: ChannelIndex, channel2: ChannelIndex, i: int, j: int|
+            config4.is_channel(channel1) && config4.is_channel(channel2) &&
+            0 <= i < aug4.aug_map[channel1].len() && 0 <= j < aug4.aug_map[channel2].len() &&
+            (channel1 != channel2 || i != j)
+        implies
+            aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]) by
+        {
+            // TODO: this should be true
+            assume(false);
+        }
+    }
+
+    assert(consistent_step(op2, config1, aug1, config4, aug4)) by {
+        let inputs = config1.get_op_input_channels(op2);
+        let outputs = config1.get_op_output_channels(op2);
+
+        let input_perms = Seq::new(inputs.len(), |i: int| aug1.aug_map[inputs[i]].first());
+        let output_perms = Seq::new(outputs.len(), |i: int| aug4.aug_map[outputs[i]].last());
+
+        let input_perms_after_op1 = Seq::new(inputs.len(), |i: int| aug2.aug_map[inputs[i]].first());
+        let output_perms_after_op1_op2 = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
+
+        // config1.lemma_step_independence(op1, op2);
+        assert(input_perms =~= input_perms_after_op1);
+        assert(output_perms =~= output_perms_after_op1_op2);
+
+        // assert forall |channel: ChannelIndex|
+        //     #[trigger] config1.is_channel(channel)
+        // implies {
+        //     if !inputs.contains(channel) && !outputs.contains(channel) {
+        //         aug1.aug_map[channel] =~= aug4.aug_map[channel]
+        //     } else if inputs.contains(channel) && !outputs.contains(channel) {
+        //         aug4.aug_map[channel] =~= aug1.aug_map[channel].drop_first()
+        //     } else if !inputs.contains(channel) && outputs.contains(channel) {
+        //         aug4.aug_map[channel].drop_last() =~= aug1.aug_map[channel]
+        //     } else {
+        //         aug4.aug_map[channel].drop_last() =~= aug1.aug_map[channel].drop_first()
+        //     }
+        // } by
+        // {
+        //     if !inputs.contains(channel) && !outputs.contains(channel) {
+        //         // assert(aug1.aug_map[channel] =~= aug4.aug_map[channel]);
+        //     } else if inputs.contains(channel) && !outputs.contains(channel) {
+        //         // assert(aug4.aug_map[channel] =~= aug1.aug_map[channel].drop_first());
+        //     } else if !inputs.contains(channel) && outputs.contains(channel) {
+        //         // assert(aug4.aug_map[channel].drop_last() =~= aug1.aug_map[channel]);
+        //     } else {
+        //         // assert(aug4.aug_map[channel].drop_last() =~= aug1.aug_map[channel].drop_first());   
+        //     }
+        // }
+
+        // assert(Permission::union_of(input_perms).contains(Permission::union_of(output_perms)));
+
+        // assert(config1.operators[op2].is_Read() ==>
+        //     Permission::union_of(input_perms).has_read(config1.get_op_input_values(op2)[0].as_address()));
+        
+        // assert(config1.operators[op2].is_Write() ==>
+        //     Permission::union_of(input_perms).has_write(config1.get_op_input_values(op2)[0].as_address()));
+
+    }
+
+    assert(consistent_step(op1, config4, aug4, config3, aug3)) by {
+        let op1_inputs = config4.get_op_input_channels(op1);
+        let op1_outputs = config4.get_op_output_channels(op1);
+        
+        let op2_inputs = config1.get_op_input_channels(op2);
+        let op2_outputs = config1.get_op_output_channels(op2);
+
+        assert(op1_inputs == config1.get_op_input_channels(op1));
+        assert(op1_outputs == config1.get_op_output_channels(op1));
+
+        assert(op2_inputs == config2.get_op_input_channels(op2));
+        assert(op2_outputs == config2.get_op_output_channels(op2));
+
+        assert(
+            config4.valid() &&
+            config3.valid() &&
+            config3 == config4.step(op1) &&
+            aug4.valid(config4) &&
+            aug3.valid(config3)
+        );
+
+        assert forall |channel: ChannelIndex|
+            #[trigger] config4.is_channel(channel)
+        implies {
+            if !op1_inputs.contains(channel) && !op1_outputs.contains(channel) {
+                aug3.aug_map[channel] =~= aug4.aug_map[channel]
+            } else if op1_inputs.contains(channel) && !op1_outputs.contains(channel) {
+                aug3.aug_map[channel] =~= aug4.aug_map[channel].drop_first()
+            } else if !op1_inputs.contains(channel) && op1_outputs.contains(channel) {
+                aug3.aug_map[channel].drop_last() =~= aug4.aug_map[channel]
+            } else {
+                aug3.aug_map[channel].drop_last() =~= aug4.aug_map[channel].drop_first()
+            }
+        } by
+        {
+            reveal(Configuration::step);
+
+            if (!op2_inputs.contains(channel) && op2_outputs.contains(channel) &&
+                op1_inputs.contains(channel) && !op1_outputs.contains(channel)) {
+
+                // Let A be some sequence
+                // aug1 = [a] + A
+                // aug2 = A
+                // aug3 = A + [b]
+                // aug4 = [a] + A + [b]
+
+                assert(aug1.aug_map[channel].len() >= 1);
+                assert(aug3.aug_map[channel].len() >= 1);
+
+                let a = aug1.aug_map[channel].first();
+                let b = aug3.aug_map[channel].last();
+
+                assert(aug4.aug_map[channel] =~= seq![a] + aug2.aug_map[channel] + seq![b]);
+                assert(aug3.aug_map[channel] =~= aug2.aug_map[channel] + seq![b]);
+            }
+        }
+
+        let input_perms_after_op2 = Seq::new(op1_inputs.len(), |i: int| aug4.aug_map[op1_inputs[i]].first());
+        let output_perms_after_op2_op1 = Seq::new(op1_outputs.len(), |i: int| aug3.aug_map[op1_outputs[i]].last());
+
+        let input_perms_init = Seq::new(op1_inputs.len(), |i: int| aug1.aug_map[op1_inputs[i]].first());
+        let output_perms_after_op1 = Seq::new(op1_outputs.len(), |i: int| aug2.aug_map[op1_outputs[i]].last());
+
+        assert(input_perms_after_op2 =~= input_perms_init);
+        assert(output_perms_after_op2_op1 =~= output_perms_after_op1);
+    }
+}
+
+/**
  * Lemma: If we have two consistent steps with both operators fireable in the initial config,
  * then their order of execution can be swapped without changing the result.
  */
@@ -365,22 +607,35 @@ proof fn lemma_consistent_step_commute(
 
     ensures
         config1.step(op2).step(op1) == config3,
-{
-    if (config1.operators[op1].is_NonMemory() ||
-        config1.operators[op2].is_NonMemory() ||
-        (config1.operators[op1].is_Read() && config1.operators[op2].is_Read())) {
-        config1.lemma_step_non_memory_commute(op1, op2);
-    } else {
-        // op1 and op2 are accessing different memory locations
-        lemma_consistent_step_disjoint_memory_address(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 
-        assert(config3 == config1.step(op2).step(op1)) by {
-            reveal(Configuration::step);
-            assert(config3.operators =~= config1.step(op2).step(op1).operators);
-            assert(config3.memory =~= config1.step(op2).step(op1).memory);
-            assert(config3.channels =~~= config1.step(op2).step(op1).channels);
+        // (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
+        // is a consistent trace
+        ({
+            let config4 = config1.step(op2);
+            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            consistent_step(op2, config1, aug1, config4, aug4) &&
+            consistent_step(op1, config4, aug4, config3, aug3)
+        }),
+{
+    assert(config1.step(op2).step(op1) == config3) by {
+        if (config1.operators[op1].is_NonMemory() ||
+            config1.operators[op2].is_NonMemory() ||
+            (config1.operators[op1].is_Read() && config1.operators[op2].is_Read())) {
+            config1.lemma_step_non_memory_commute(op1, op2);
+        } else {
+            // op1 and op2 are accessing different memory locations
+            lemma_consistent_step_disjoint_memory_address(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+
+            assert(config3 == config1.step(op2).step(op1)) by {
+                reveal(Configuration::step);
+                assert(config3.operators =~= config1.step(op2).step(op1).operators);
+                assert(config3.memory =~= config1.step(op2).step(op1).memory);
+                assert(config3.channels =~~= config1.step(op2).step(op1).channels);
+            }
         }
     }
+
+    lemma_consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 }
 
 } // verus!

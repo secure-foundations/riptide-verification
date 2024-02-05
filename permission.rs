@@ -66,6 +66,7 @@ impl Permission {
     /**
      * Whether the permission has read permission on an address
      */
+    #[verifier(opaque)]
     pub open spec fn has_read(self, addr: Address) -> bool
         recommends self.valid()
     {
@@ -75,6 +76,7 @@ impl Permission {
     /**
      * Whether the permission has write permission on an address
      */
+    #[verifier(opaque)]
     pub open spec fn has_write(self, addr: Address) -> bool
         recommends self.valid()
     {
@@ -119,11 +121,6 @@ impl Permission {
                 perm1.contains(perm2) && perm2.contains(perm3) ==>
                 perm1.contains(perm3)),
     {
-        // Permission::lemma_union_contains_element_auto();
-        // Permission::lemma_union_element_disjoint_auto();
-        // Permission::lemma_subpermission_disjoint_auto();
-        // Permission::lemma_disjoint_commutative_auto();
-        // Permission::lemma_contains_transitive_auto();
         reveal(Permission::union_of);
         reveal(Permission::contains);
         reveal(Permission::disjoint);
@@ -186,6 +183,11 @@ impl PermissionAugmentation {
     }
 }
 
+/**
+ * Defines what it means for an augmented transition/step
+ * (config1, aug1) -> (config2, aug2)
+ * to be consistent,
+ */
 pub open spec fn consistent_step(
     op: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
@@ -242,7 +244,8 @@ pub open spec fn consistent_step(
 }
 
 /**
- * Lemma: Similar to lemma_step_independence, but for input permissions
+ * Lemma: Input permissions are not changed after firing
+ * a different operator (similar to lemma_step_independence).
  */
 pub proof fn lemma_step_independent_input_permissions(
     op1: OperatorIndex, op2: OperatorIndex,
@@ -301,7 +304,7 @@ proof fn lemma_fireable_disjoint_input_permissions(
  * can be fired in consistent steps, then their accessed memory addresses
  * must be different.
  */
-proof fn lemma_consistent_step_disjoint_memory_address(
+proof fn lemma_consistent_steps_have_distinct_memory_addresses(
     op1: OperatorIndex, op2: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
     config2: Configuration, aug2: PermissionAugmentation,
@@ -353,17 +356,19 @@ proof fn lemma_consistent_step_disjoint_memory_address(
             }
             reveal(Permission::union_of);
             reveal(Permission::disjoint);
+            reveal(Permission::has_read);
+            reveal(Permission::has_write);
             assert(false);
         }
     }
 }
 
 /**
- * Returns a valid augmentation aug4 for config1.step(op2)
+ * Constructs a valid augmentation aug4 for config1.step(op2)
  * such that (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
  * is a consistent trace.
  */
-spec fn consistent_step_commute_aug4_choice(
+spec fn consistent_steps_commute_augmentation(
     op1: OperatorIndex, op2: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
     config2: Configuration, aug2: PermissionAugmentation,
@@ -401,7 +406,7 @@ spec fn consistent_step_commute_aug4_choice(
  * and (channel2, j) is another position of a permission in aug4,
  * then these two permissions are disjoint
  */
-proof fn lemma_consistent_step_commute_aug4_choice_helper(
+proof fn lemma_consistent_steps_commute_augmentation_helper(
     op1: OperatorIndex, op2: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
     config2: Configuration, aug2: PermissionAugmentation,
@@ -426,7 +431,7 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
 
         ({
             let config4 = config1.step(op2);
-            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 
             config4.is_channel(channel1) &&
             config4.is_channel(channel2) &&
@@ -442,12 +447,12 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
 
     ensures
         ({
-            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
             aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])
         }),
 {
     let config4 = config1.step(op2);
-    let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 
     let op1_inputs = config1.get_op_input_channels(op1);
     let op1_outputs = config1.get_op_output_channels(op1);
@@ -464,7 +469,7 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
         // to be consumed.
         // i.e. aug4.aug_map[channel2][j] <= op1 input permissions
         // aug4.aug_map[channel1][i] <= op2 output permissions
-        // Since disjoint(op1 input permissions, op2 input permissions) (by lemma_consistent_step_disjoint_memory_address)
+        // Since disjoint(op1 input permissions, op2 input permissions) (by lemma_consistent_steps_have_distinct_memory_addresses)
         // and op2 output permissions <= op2 input permissions
         // we have disjoint(aug4.aug_map[channel1][i], aug4.aug_map[channel2][j])
 
@@ -521,11 +526,11 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
 }
 
 /**
- * Lemma: the augmentation returned by consistent_step_commute_aug4_choice
+ * Lemma: the augmentation returned by consistent_steps_commute_augmentation
  * does make (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
  * a consistent trace
  */
-proof fn lemma_consistent_step_commute_aug4_choice(
+proof fn lemma_consistent_steps_commute_augmentation(
     op1: OperatorIndex, op2: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
     config2: Configuration, aug2: PermissionAugmentation,
@@ -548,14 +553,14 @@ proof fn lemma_consistent_step_commute_aug4_choice(
     ensures
         ({
             let config4 = config1.step(op2);
-            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
             
             consistent_step(op2, config1, aug1, config4, aug4) &&
             consistent_step(op1, config4, aug4, config3, aug3)
         }),
 {
     let config4 = config1.step(op2);
-    let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
     
     config1.lemma_step_valid(op2);
     
@@ -583,9 +588,9 @@ proof fn lemma_consistent_step_commute_aug4_choice(
             aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]) by
         {
             if op2_outputs.contains(channel1) && i == aug4.aug_map[channel1].len() - 1 {
-                lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel1, i, channel2, j);
+                lemma_consistent_steps_commute_augmentation_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel1, i, channel2, j);
             } else if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-                lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel2, j, channel1, i);
+                lemma_consistent_steps_commute_augmentation_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel2, j, channel1, i);
                 Permission::lemma_union_disjoint_reasoning_auto();
             }
         }
@@ -675,7 +680,7 @@ proof fn lemma_consistent_step_commute_aug4_choice(
  * Lemma: If we have two consistent steps with both operators fireable in the initial config,
  * then their order of execution can be swapped without changing the result.
  */
-proof fn lemma_consistent_step_commute(
+proof fn lemma_consistent_steps_commute(
     op1: OperatorIndex, op2: OperatorIndex,
     config1: Configuration, aug1: PermissionAugmentation,
     config2: Configuration, aug2: PermissionAugmentation,
@@ -700,7 +705,7 @@ proof fn lemma_consistent_step_commute(
         // is a consistent trace
         ({
             let config4 = config1.step(op2);
-            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
             consistent_step(op2, config1, aug1, config4, aug4) &&
             consistent_step(op1, config4, aug4, config3, aug3)
         }),
@@ -712,7 +717,7 @@ proof fn lemma_consistent_step_commute(
             config1.lemma_step_non_memory_commute(op1, op2);
         } else {
             // op1 and op2 are accessing different memory locations
-            lemma_consistent_step_disjoint_memory_address(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            lemma_consistent_steps_have_distinct_memory_addresses(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 
             assert(config3 == config1.step(op2).step(op1)) by {
                 reveal(Configuration::step);
@@ -723,7 +728,7 @@ proof fn lemma_consistent_step_commute(
         }
     }
 
-    lemma_consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    lemma_consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
 }
 
 } // verus!

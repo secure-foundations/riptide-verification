@@ -1066,6 +1066,9 @@ proof fn lemma_multiset_contains_transitive_elem(s1: Seq<OperatorIndex>, s2: Seq
     let _ = s1.to_multiset().count(op);
 }
 
+/**
+ * Constructs the convergence trace in theorem_bounded_confluence
+ */
 #[verifier(opaque)]
 spec fn bounded_confluence_trace(trace1: AugmentedTrace, trace2_configs: Seq<Configuration>, trace2_operators: Seq<OperatorIndex>) -> AugmentedTrace
     // recommends
@@ -1110,19 +1113,21 @@ spec fn bounded_confluence_trace(trace1: AugmentedTrace, trace2_configs: Seq<Con
 proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<Configuration>, trace2_operators: Seq<OperatorIndex>)
     requires
         trace1.valid(),
-        trace2_configs.len() == trace2_operators.len() + 1,
         
+        // (trace2_configs, trace2_operators) is a valid trace (without augmentation)
+        trace2_configs.len() == trace2_operators.len() + 1,
         (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i].valid())) &&
         (forall |i: int| 0 <= i < trace2_operators.len() ==>
             (#[trigger] trace2_configs[i]).fireable(trace2_operators[i]) &&
             trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
-            
+    
         trace2_configs.first() == trace1.configs.first().config,
 
         multiset_contains(trace1.operators, trace2_operators),
 
     ensures
         ({
+            // Exists a valid augmented trace from trace2_config.last() to trace1.configs.last()
             let convergent_trace = bounded_confluence_trace(trace1, trace2_configs, trace2_operators);
 
             convergent_trace.valid() &&

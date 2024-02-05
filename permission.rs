@@ -828,6 +828,7 @@ proof fn lemma_consistent_steps_commute(
     lemma_consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
 }
 
+#[verifier(opaque)]
 spec fn consistent_trace_commutes(trace: AugmentedTrace) -> AugmentedTrace
     recommends trace.len() > 0
     decreases trace.len()
@@ -916,6 +917,7 @@ proof fn lemma_consistent_trace_commutes(trace: AugmentedTrace)
 
     decreases trace.len()
 {
+    reveal(consistent_trace_commutes);
     let commuted_trace = consistent_trace_commutes(trace);
 
     if trace.len() == 1 {
@@ -963,18 +965,20 @@ proof fn lemma_consistent_trace_commutes(trace: AugmentedTrace)
 /**
  * Defines s1 >= s2 as a multiset
  */
+#[verifier(opaque)]
 spec fn multiset_contains(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>) -> bool
 {
     s2.to_multiset().subset_of(s1.to_multiset())
 }
 
+#[verifier(opaque)]
 spec fn bounded_confluence_trace(trace1: AugmentedTrace, trace2_configs: Seq<Configuration>, trace2_operators: Seq<OperatorIndex>) -> AugmentedTrace
-    recommends
-        trace1.valid(),
-        trace2_configs.len() == trace2_operators.len() + 1,
-        (forall |i: int| 0 <= i < trace2_operators.len() ==> #[trigger] trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
-        trace2_configs[0] == trace1.configs.first().config,
-        multiset_contains(trace1.operators, trace2_operators),
+    // recommends
+    //     trace1.valid(),
+    //     trace2_configs.len() == trace2_operators.len() + 1,
+    //     (forall |i: int| 0 <= i < trace2_operators.len() ==> #[trigger] trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
+    //     trace2_configs[0] == trace1.configs.first().config,
+    //     multiset_contains(trace1.operators, trace2_operators),
 
     decreases trace2_operators.len()
 {
@@ -1014,12 +1018,13 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
         trace1.valid(),
         trace2_configs.len() == trace2_operators.len() + 1,
         
-        (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i]).valid()) &&
+        (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i].valid())) &&
         (forall |i: int| 0 <= i < trace2_operators.len() ==>
             (#[trigger] trace2_configs[i]).fireable(trace2_operators[i]) &&
             trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
             
-        trace2_configs[0] == trace1.configs.first().config,
+        trace2_configs.first() == trace1.configs.first().config,
+
         multiset_contains(trace1.operators, trace2_operators),
 
     ensures
@@ -1027,7 +1032,6 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
             let convergent_trace = bounded_confluence_trace(trace1, trace2_configs, trace2_operators);
 
             convergent_trace.valid() &&
-
             convergent_trace.len() == trace1.len() &&
 
             // trace2_configs is a prefix of convergent_trace
@@ -1043,10 +1047,15 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
 
     decreases trace2_operators.len()
 {
+    hide(Configuration::valid);
+    hide(AugmentedConfiguration::valid);
+    reveal(bounded_confluence_trace);
+
     if trace2_operators.len() > 0 {
         let trace1_first_op = trace1.operators.first();
         let trace2_first_op = trace2_operators.first();
 
+        // TODO: multiset fact
         assume(trace1.len() > 1);
         assume(trace1.len() >= trace2_configs.len());
 
@@ -1057,69 +1066,17 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
             // trace2_configs[1] == trace1.configs[1].config
             let convergent_trace_rest = bounded_confluence_trace(trace1.drop_first(), trace2_configs.drop_first(), trace2_operators.drop_first());
 
-            // TODO: some facts about multiset inclusion
+            // TODO: multiset fact
             assume(multiset_contains(trace1.drop_first().operators, trace2_operators.drop_first()));
-            
-            // assert(trace2_configs[1] == trace2_configs[0].step(trace2_operators[0]));
-            // assert(consistent_step(trace1.operators[0], trace1.configs[0], trace1.configs[1]));
-            // assert(trace2_configs[1] == trace1.configs[1].config);
 
             theorem_bounded_confluence(trace1.drop_first(), trace2_configs.drop_first(), trace2_operators.drop_first());
-
-            let convergent_trace = convergent_trace_rest.prepend(trace1_first_op, trace1.configs.first());
-
-            // assert(convergent_trace.valid());
-            // assert((forall |i: int| 0 <= i < trace2_configs.drop_first().len() ==>
-            //     convergent_trace_rest.configs[i].config == #[trigger] trace2_configs.drop_first()[i]));
-
-            // assert(trace2_configs.drop_first().len() + 1 == trace2_configs.len());
-            // assert(trace2_operators.drop_first().len() + 1 == trace2_operators.len());
-
-            // assert(seq![convergent_trace.configs[0]] + convergent_trace_rest.configs =~= convergent_trace.configs);
-            // assert(seq![convergent_trace.operators[0]] + convergent_trace_rest.operators =~= convergent_trace.operators);
-
-            // assert(forall |i: int| 0 <= i < convergent_trace_rest.configs.len() ==> convergent_trace_rest.configs[i] == convergent_trace.configs[i + 1]);
-
-            // assert((forall |i: int| 0 <= i < trace2_configs.len() ==>
-            //     convergent_trace.configs[i].config == #[trigger] trace2_configs[i]));
-
-            // assert((forall |i: int| 0 <= i < trace2_operators.len() ==>
-            //     convergent_trace.operators[i] == #[trigger] trace2_operators[i]));
-
-            // assert forall |i: int|
-            //     0 <= i < trace2_configs.len()
-            // implies
-            //     convergent_trace.configs[i].config == #[trigger] trace2_configs[i] by
-            // {
-            //     if i == 0 {
-
-            //     } else {
-            //         assert(convergent_trace.configs[i] == convergent_trace_rest.configs[i - 1]);
-            //         // assert(convergent_trace.configs[i].config == convergent_trace_rest.configs[i - 1].config);
-            //         assume(false);
-            //     }
-            // }
-
-            // assume(false);
         } else {
             let first_occurrence_opt = trace1.operators.index_of_first(trace2_first_op);
             let first_occurrence = first_occurrence_opt.get_Some_0();
             
-            assert(
-                0 < first_occurrence < trace1.operators.len() &&
-                trace1.operators[first_occurrence] == trace2_first_op &&
-                (forall |i: int| 0 <= i < first_occurrence ==> trace1.operators[i] != trace2_first_op)
-            ) by {
-                match first_occurrence_opt {
-                    Some(_) => {
-                        trace1.operators.index_of_first_ensures(trace2_first_op);
-                    },
-                    None => {
-                        // Multiset fact
-                        assume(false);
-                    },
-                };
-            }
+            // TODO: multiset fact
+            assume(!first_occurrence_opt.is_None());
+            trace1.operators.index_of_first_ensures(trace2_first_op);
 
             let trace_prefix = trace1.take(first_occurrence + 1);
             let trace_suffix = trace1.skip(first_occurrence + 1);
@@ -1129,61 +1086,13 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
             let commuted_trace_prefix = consistent_trace_commutes(trace_prefix);
             lemma_consistent_trace_commutes(trace_prefix);
 
-            // assert(commuted_trace_prefix.operators[0] == trace2_first_op);
-
             let commuted_trace_rest = commuted_trace_prefix.drop_first().add(trace_suffix);
 
-            let convergent_trace_rest = bounded_confluence_trace(
-                commuted_trace_rest,
-                trace2_configs.drop_first(),
-                trace2_operators.drop_first(),
-            );
+            let convergent_trace_rest = bounded_confluence_trace(commuted_trace_rest, trace2_configs.drop_first(), trace2_operators.drop_first());
 
             assume(multiset_contains(commuted_trace_rest.operators, trace2_operators.drop_first()));
 
-            // assert(commuted_trace_prefix.drop_first().configs[0] == commuted_trace_prefix.configs[1]);
-            // assert(commuted_trace_prefix.drop_first().add(trace_suffix).configs[0] == commuted_trace_prefix.configs[1]);
-            // assert(convergent_trace_rest.configs[0] == commuted_trace_prefix.configs[1]);
-            // assert(convergent_trace_rest.configs[1].config == commuted_trace_prefix.configs[0].config.step(trace2_first_op));
-
-            theorem_bounded_confluence(
-                commuted_trace_rest,
-                trace2_configs.drop_first(),
-                trace2_operators.drop_first(),
-            );
-
-            let convergent_trace = convergent_trace_rest.prepend(commuted_trace_prefix.operators.first(), commuted_trace_prefix.configs.first());
-
-            // assert(convergent_trace.valid() && convergent_trace.len() == trace1.len());
-
-            // assert forall |i: int| 0 <= i < trace2_configs.len() implies
-            //     convergent_trace.configs[i].config == #[trigger] trace2_configs[i] by
-            // {
-            //     // if i == 0 {
-            //     // } else {
-            //     //     assert(convergent_trace.configs =~= seq![commuted_trace_prefix.configs.first()] + convergent_trace_rest.configs);
-            //     //     assert(convergent_trace.configs[i] == convergent_trace_rest.configs[i - 1]);
-            //     //     assert(convergent_trace_rest.configs[i - 1].config == );
-
-            //     //     assume(false);
-            //     // }
-            // }
-
-            // assert(convergent_trace.valid() &&
-
-            // convergent_trace.len() == trace1.len() &&
-
-            // // trace2_configs is a prefix of convergent_trace
-            // (forall |i: int| 0 <= i < trace2_configs.len() ==>
-            //     convergent_trace.configs[i].config == #[trigger] trace2_configs[i]) &&
-            // (forall |i: int| 0 <= i < trace2_operators.len() ==>
-            //     convergent_trace.operators[i] == #[trigger] trace2_operators[i]) &&
-
-            // // convergent_trace starts and ends the same as trace1 (with the same augmentation)
-            // convergent_trace.configs.first() == trace1.configs.first() &&
-            // convergent_trace.configs.last() == trace1.configs.last());
-
-            // assume(false);
+            theorem_bounded_confluence(commuted_trace_rest, trace2_configs.drop_first(), trace2_operators.drop_first());
         }
     }
 }

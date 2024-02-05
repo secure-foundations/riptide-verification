@@ -32,6 +32,7 @@ impl Permission {
     /**
      * Condition for two permissions to be considered disjoint
      */
+    #[verifier(opaque)]
     pub open spec fn disjoint(self, other: Permission) -> bool
         recommends
             self.valid(),
@@ -47,6 +48,7 @@ impl Permission {
     /**
      * (Disjoint) union of a list of permissions
      */
+    #[verifier(opaque)]
     pub open spec fn union_of(perms: Seq<Permission>) -> Permission
         recommends
             forall |i: int| 0 <= i < perms.len() ==> (#[trigger] perms[i]).valid(),
@@ -82,6 +84,7 @@ impl Permission {
     /**
      * Condition for self to contain other
      */
+    #[verifier(opaque)]
     pub open spec fn contains(self, other: Permission) -> bool
         recommends
             self.valid(),
@@ -94,40 +97,60 @@ impl Permission {
             (other.access[addr][i] ==> self.access[addr][i])
     }
 
-    pub proof fn lemma_union_contains_element(perms: Seq<Permission>)
+    // Some auto facts about permissions, union, disjoint, and contains
+    pub proof fn lemma_union_disjoint_reasoning_auto()
         ensures
-            forall |i: int| 0 <= i < perms.len() ==> Self::union_of(perms).contains(#[trigger] perms[i])
-    {}
+            (forall |perms: Seq<Permission>, i: int| 0 <= i < perms.len() ==> Self::union_of(perms).contains(#[trigger] perms[i])),
+            (forall |perms: Seq<Permission>, other: Permission, i: int|
+                0 <= i < perms.len() &&
+                Self::union_of(perms).disjoint(other)
+                ==> #[trigger] perms[i].disjoint(other)),
+            (forall |perm1: Permission, perm2: Permission, perm3: Permission|
+                #![trigger perm2.contains(perm1), perm2.disjoint(perm3)]
+                #![trigger perm2.contains(perm1), perm1.disjoint(perm3)]
+                #![trigger perm2.disjoint(perm3), perm1.disjoint(perm3)]
+                perm2.contains(perm1) && perm2.disjoint(perm3) ==>
+                perm1.disjoint(perm3)),
+            (forall |perm1: Permission, perm2: Permission|
+                #![trigger perm1.disjoint(perm2)]
+                #![trigger perm2.disjoint(perm1)]
+                perm1.disjoint(perm2) == perm2.disjoint(perm1)),
+            (forall |perm1: Permission, perm2: Permission, perm3: Permission|
+                perm1.contains(perm2) && perm2.contains(perm3) ==>
+                perm1.contains(perm3)),
+    {
+        // Permission::lemma_union_contains_element_auto();
+        // Permission::lemma_union_element_disjoint_auto();
+        // Permission::lemma_subpermission_disjoint_auto();
+        // Permission::lemma_disjoint_commutative_auto();
+        // Permission::lemma_contains_transitive_auto();
+        reveal(Permission::union_of);
+        reveal(Permission::contains);
+        reveal(Permission::disjoint);
+    }
 
-    pub proof fn lemma_union_element_disjoint(perms: Seq<Permission>, other: Permission)
+    /**
+     * Lemma: Let perms1 and perms2 be two lists of permissions.
+     * If any permission in perms1 is disjoint from any permission
+     * in perms2, then the union of perms1 is disjoint from the
+     * union of perms2.
+     */
+    pub proof fn lemma_mutually_disjoint_union(perms1: Seq<Permission>, perms2: Seq<Permission>)
         requires
-            Self::union_of(perms).disjoint(other)
+            perms1.len() > 0,
+            perms2.len() > 0,
+
+            forall |i: int, j: int|
+                #![trigger perms1[i], perms2[j]]
+                0 <= i < perms1.len() && 0 <= j < perms2.len() ==>
+                perms1[i].disjoint(perms2[j])
 
         ensures
-            forall |i: int| 0 <= i < perms.len() ==> (#[trigger] perms[i]).disjoint(other)
-    {}
-
-    pub proof fn lemma_subpermission_disjoint(perm1: Permission, perm2: Permission, perm3: Permission)
-        requires
-            perm2.contains(perm1),
-            perm2.disjoint(perm3),
-
-        ensures
-            perm1.disjoint(perm3),
-    {}
-
-    pub proof fn lemma_disjoint_commutative(perm1: Permission, perm2: Permission)
-        ensures perm1.disjoint(perm2) == perm2.disjoint(perm1)
-    {}
-
-    pub proof fn lemma_contains_transitive(perm1: Permission, perm2: Permission, perm3: Permission)
-        requires
-            perm1.contains(perm2),
-            perm2.contains(perm3),
-
-        ensures
-            perm1.contains(perm3),
-    {}
+            Permission::union_of(perms1).disjoint(Permission::union_of(perms2))
+    {
+        reveal(Permission::union_of);
+        reveal(Permission::disjoint);
+    }
 }
 
 impl PermissionAugmentation {
@@ -235,35 +258,9 @@ pub proof fn lemma_step_independent_input_permissions(
     ensures
         aug1.get_op_input_permissions(config1, op2) == aug2.get_op_input_permissions(config2, op2)
 {
-    reveal(Configuration::step);
+    config1.lemma_step_independence(op1, op2);
     assert(aug1.get_op_input_permissions(config1, op2) =~= aug2.get_op_input_permissions(config2, op2));
 }
-
-// Permission {
-//     access: Map::total(|addr: Address|
-//         Seq::new(permission_write_split(),
-//             |i: int| exists |j: int| 0 <= j < perms.len() && #[trigger] perms[j].access[addr][i])),
-// }
-
-/**
- * Lemma: Let perms1 and perms2 be two lists of permissions.
- * If any permission in perms1 is disjoint from any permission
- * in perms2, then the union of perms1 is disjoint from the
- * union of perms2.
- */
-proof fn lemma_mutually_disjoint_union(perms1: Seq<Permission>, perms2: Seq<Permission>)
-    requires
-        perms1.len() > 0,
-        perms2.len() > 0,
-
-        forall |i: int, j: int|
-            #![trigger perms1[i], perms2[j]]
-            0 <= i < perms1.len() && 0 <= j < perms2.len() ==>
-            perms1[i].disjoint(perms2[j])
-
-    ensures
-        Permission::union_of(perms1).disjoint(Permission::union_of(perms2))
-{}
 
 /**
  * Lemma: If both op1 and op2 are fireable in an augmented
@@ -290,11 +287,14 @@ proof fn lemma_fireable_disjoint_input_permissions(
 
     assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
         if op1_input_perms_init.len() > 0 && op2_input_perms_init.len() > 0 {
-            lemma_mutually_disjoint_union(op1_input_perms_init, op2_input_perms_init);
+            Permission::lemma_mutually_disjoint_union(op1_input_perms_init, op2_input_perms_init);
+            Permission::lemma_union_disjoint_reasoning_auto();
+        } else {
+            reveal(Permission::union_of);
+            reveal(Permission::disjoint);
         }
     }
 }
-
 /**
  * Lemma: If both **memory** operators op1 and op2 are fireable in a
  * configuration (and one of op1 and op2 is a write), and op1 and op2
@@ -351,6 +351,8 @@ proof fn lemma_consistent_step_disjoint_memory_address(
             if (config1.operators[op1].is_Write() && config1.operators[op2].is_Write()) {
                 let trigger = op1_input_perm_union.access[op1_address][0];
             }
+            reveal(Permission::union_of);
+            reveal(Permission::disjoint);
             assert(false);
         }
     }
@@ -373,23 +375,6 @@ spec fn consistent_step_commute_aug4_choice(
 
     let input_perms = aug1.get_op_input_permissions(config1, op2);
     let output_perms = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
-
-    // let input_updated_aug_map = Map::new(
-    //     |channel: ChannelIndex| config1.is_channel(channel),
-    //     |channel: ChannelIndex|
-    //         if inputs.contains(channel) { aug1.aug_map[channel].drop_first() }
-    //         else { aug1.aug_map[channel] }
-    // );
-
-    // let output_updated_aug_map = Map::new(
-    //     |channel: ChannelIndex| config1.is_channel(channel),
-    //     |channel: ChannelIndex|
-    //         if outputs.contains(channel) {
-    //             let output_index = outputs.index_of(channel);
-    //             input_updated_aug_map[channel].push(output_perms[output_index])
-    //         }
-    //         else { input_updated_aug_map[channel] }
-    // );
 
     let new_aug_map = Map::new(
         |channel: ChannelIndex| config1.is_channel(channel),
@@ -489,9 +474,10 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
         let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
         let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug3.aug_map[op2_outputs[i]].last());
 
+        Permission::lemma_union_disjoint_reasoning_auto();
+
         assert(Permission::union_of(op2_input_perms_init).contains(aug4.aug_map[channel1][i])) by {
             assert(op2_output_perms_after_op1[op2_outputs.index_of(channel1)] == aug4.aug_map[channel1][i]);
-            Permission::lemma_union_contains_element(op2_output_perms_after_op1);
             assert(Permission::union_of(op2_output_perms_after_op1).contains(aug4.aug_map[channel1][i]));
 
             // By validity of the transition (config2, aug2) -> (config3, aug3)
@@ -504,30 +490,31 @@ proof fn lemma_consistent_step_commute_aug4_choice_helper(
 
         assert(Permission::union_of(op1_input_perms_init).contains(aug4.aug_map[channel2][j])) by {
             assert(op1_input_perms_init[op1_inputs.index_of(channel2)] == aug4.aug_map[channel2][j]);
-            Permission::lemma_union_contains_element(op1_input_perms_init);
         }
 
         assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
             lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
         }
 
-        Permission::lemma_subpermission_disjoint(aug4.aug_map[channel1][i], Permission::union_of(op2_input_perms_init), Permission::union_of(op1_input_perms_init));
-        Permission::lemma_union_element_disjoint(op1_input_perms_init, aug4.aug_map[channel1][i]);
-
         assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]));
     } else {
+        // Some terms to trigger QIs
+        // Basically a more detailed proof has to do case analysis
+        // on the position of (channel2, j) (e.g. whether it's an
+        // input/output of op1/op2, and how their positions change
+        // as a result)
         let _ = aug3.aug_map[channel2][j];
         let _ = aug3.aug_map[channel2][j - 1];
         let _ = aug2.aug_map[channel2][j + 1];
         let _ = aug2.aug_map[channel2][j];
         let _ = aug2.aug_map[channel2][j - 1];
-        let _ = aug1.aug_map[channel2].drop_first()[j];
         let _ = aug1.aug_map[channel2].drop_first()[j - 1];
 
         assert(forall |seq: Seq<Permission>, i: int| 0 <= i < seq.len() - 1 ==>
             #[trigger] seq.drop_first()[i] == seq[i + 1]);
 
         assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])) by {
+            // TODO: try reduce this to some generic facts about Configuration::step
             reveal(Configuration::step);
         }
     }
@@ -599,6 +586,7 @@ proof fn lemma_consistent_step_commute_aug4_choice(
                 lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel1, i, channel2, j);
             } else if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
                 lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel2, j, channel1, i);
+                Permission::lemma_union_disjoint_reasoning_auto();
             }
         }
     }

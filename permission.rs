@@ -411,6 +411,129 @@ spec fn consistent_step_commute_aug4_choice(
 }
 
 /**
+ * (Some technical fact)
+ * Lemma: If (channel1, i) is the position of an output permission of op2 (in aug4)
+ * and (channel2, j) is another position of a permission in aug4,
+ * then these two permissions are disjoint
+ */
+proof fn lemma_consistent_step_commute_aug4_choice_helper(
+    op1: OperatorIndex, op2: OperatorIndex,
+    config1: Configuration, aug1: PermissionAugmentation,
+    config2: Configuration, aug2: PermissionAugmentation,
+    config3: Configuration, aug3: PermissionAugmentation,
+
+    channel1: ChannelIndex, i: int,
+    channel2: ChannelIndex, j: int,
+)
+    requires
+        config1.valid(),
+        config2.valid(),
+        config3.valid(),
+        config1.fireable(op1),
+        config1.fireable(op2),
+        op1 != op2,
+
+        // config1 -> config2 -> config3 is a consistent trace
+        consistent_step(op1, config1, aug1, config2, aug2),
+        consistent_step(op2, config2, aug2, config3, aug3),
+
+        config1.step(op2).step(op1) == config3,
+
+        ({
+            let config4 = config1.step(op2);
+            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+
+            config4.is_channel(channel1) &&
+            config4.is_channel(channel2) &&
+            
+            0 <= i < aug4.aug_map[channel1].len() &&
+            0 <= j < aug4.aug_map[channel2].len() &&
+            (channel1 != channel2 || i != j) &&
+
+            // (channel1, i) is the position of an output permission of op2
+            config1.get_op_output_channels(op2).contains(channel1) &&
+            i == aug4.aug_map[channel1].len() - 1
+        }),
+
+    ensures
+        ({
+            let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])
+        }),
+{
+    let config4 = config1.step(op2);
+    let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+
+    let op1_inputs = config1.get_op_input_channels(op1);
+    let op1_outputs = config1.get_op_output_channels(op1);
+
+    let op2_inputs = config1.get_op_input_channels(op2);
+    let op2_outputs = config1.get_op_output_channels(op2);
+
+    config1.lemma_step_independence(op1, op2);
+
+    assert(aug4.aug_map[channel1][i] == aug3.aug_map[channel1].last());
+
+    if op1_inputs.contains(channel2) && j == 0 {
+        // In this case, channel2 is an input channel of op1 and j is exactly the first input
+        // to be consumed.
+        // i.e. aug4.aug_map[channel2][j] <= op1 input permissions
+        // aug4.aug_map[channel1][i] <= op2 output permissions
+        // Since disjoint(op1 input permissions, op2 input permissions) (by lemma_consistent_step_disjoint_memory_address)
+        // and op2 output permissions <= op2 input permissions
+        // we have disjoint(aug4.aug_map[channel1][i], aug4.aug_map[channel2][j])
+
+        let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
+        let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
+
+        let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
+        let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug3.aug_map[op2_outputs[i]].last());
+
+        assert(Permission::union_of(op2_input_perms_init).contains(aug4.aug_map[channel1][i])) by {
+            assert(op2_output_perms_after_op1[op2_outputs.index_of(channel1)] == aug4.aug_map[channel1][i]);
+            Permission::lemma_union_contains_element(op2_output_perms_after_op1);
+            assert(Permission::union_of(op2_output_perms_after_op1).contains(aug4.aug_map[channel1][i]));
+
+            // By validity of the transition (config2, aug2) -> (config3, aug3)
+            assert(Permission::union_of(op2_input_perms_after_op1).contains(Permission::union_of(op2_output_perms_after_op1)));
+            assert(op2_input_perms_init =~= op2_input_perms_after_op1) by {
+                lemma_step_independent_input_permissions(op1, op2, config1, aug1, config2, aug2);
+            }
+            assert(Permission::union_of(op2_input_perms_init).contains(Permission::union_of(op2_output_perms_after_op1)));
+        }
+
+        assert(Permission::union_of(op1_input_perms_init).contains(aug4.aug_map[channel2][j])) by {
+            assert(op1_input_perms_init[op1_inputs.index_of(channel2)] == aug4.aug_map[channel2][j]);
+            Permission::lemma_union_contains_element(op1_input_perms_init);
+        }
+
+        assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
+            lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
+        }
+
+        Permission::lemma_subpermission_disjoint(aug4.aug_map[channel1][i], Permission::union_of(op2_input_perms_init), Permission::union_of(op1_input_perms_init));
+        Permission::lemma_union_element_disjoint(op1_input_perms_init, aug4.aug_map[channel1][i]);
+
+        assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]));
+    } else {
+        let _ = aug3.aug_map[channel2][j];
+        let _ = aug3.aug_map[channel2][j - 1];
+        let _ = aug2.aug_map[channel2][j + 1];
+        let _ = aug2.aug_map[channel2][j];
+        let _ = aug2.aug_map[channel2][j - 1];
+        let _ = aug1.aug_map[channel2].drop_first()[j];
+        let _ = aug1.aug_map[channel2].drop_first()[j - 1];
+
+        assert(forall |seq: Seq<Permission>, i: int| 0 <= i < seq.len() - 1 ==>
+            #[trigger] seq.drop_first()[i] == seq[i + 1]);
+
+        assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])) by {
+            reveal(Configuration::step);
+        }
+    }
+}
+
+/**
  * Lemma: the augmentation returned by consistent_step_commute_aug4_choice
  * does make (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
  * a consistent trace
@@ -433,7 +556,6 @@ proof fn lemma_consistent_step_commute_aug4_choice(
         consistent_step(op1, config1, aug1, config2, aug2),
         consistent_step(op2, config2, aug2, config3, aug3),
 
-        // This is left as an assumption
         config1.step(op2).step(op1) == config3,
 
     ensures
@@ -449,9 +571,6 @@ proof fn lemma_consistent_step_commute_aug4_choice(
     let aug4 = consistent_step_commute_aug4_choice(op1, op2, config1, aug1, config2, aug2, config3, aug3);
     
     config1.lemma_step_valid(op2);
-    config1.lemma_step_independence(op1, op2);
-    config4.lemma_step_valid(op1);
-    config2.lemma_step_valid(op2);
     
     assert(aug4.valid(config4)) by {
         let op1_inputs = config1.get_op_input_channels(op1);
@@ -459,8 +578,6 @@ proof fn lemma_consistent_step_commute_aug4_choice(
 
         let op2_inputs = config1.get_op_input_channels(op2);
         let op2_outputs = config1.get_op_output_channels(op2);
-
-        assert(aug4.aug_map.dom() =~= config4.graph.channels);
         
         assert forall |channel: ChannelIndex|
             #[trigger] config4.is_channel(channel)
@@ -478,244 +595,11 @@ proof fn lemma_consistent_step_commute_aug4_choice(
         implies
             aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]) by
         {
-            // assert(config3.is_channel(channel1));
-            // assert(config3.is_channel(channel2));
-
             if op2_outputs.contains(channel1) && i == aug4.aug_map[channel1].len() - 1 {
-                assert(aug4.aug_map[channel1][i] == aug3.aug_map[channel1].last());
-
-                // if !(op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1) &&
-                if op1_inputs.contains(channel2) && j == 0 {
-                    // In this case, channel2 is an input channel of op1 and j is exactly the first input
-                    // to be consumed.
-                    // i.e. aug4.aug_map[channel2][j] <= op1 input permissions
-                    // aug4.aug_map[channel1][i] <= op2 output permissions
-                    // Since disjoint(op1 input permissions, op2 input permissions) (by lemma_consistent_step_disjoint_memory_address)
-                    // and op2 output permissions <= op2 input permissions
-                    // we have disjoint(aug4.aug_map[channel1][i], aug4.aug_map[channel2][j])
-
-                    let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
-                    let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
-
-                    let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
-                    let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug3.aug_map[op2_outputs[i]].last());
-
-                    assert(Permission::union_of(op2_input_perms_init).contains(aug4.aug_map[channel1][i])) by {
-                        assert(op2_output_perms_after_op1[op2_outputs.index_of(channel1)] == aug4.aug_map[channel1][i]);
-                        Permission::lemma_union_contains_element(op2_output_perms_after_op1);
-                        assert(Permission::union_of(op2_output_perms_after_op1).contains(aug4.aug_map[channel1][i]));
-
-                        // By validity of the transition (config2, aug2) -> (config3, aug3)
-                        assert(Permission::union_of(op2_input_perms_after_op1).contains(Permission::union_of(op2_output_perms_after_op1)));
-                        assert(op2_input_perms_init =~= op2_input_perms_after_op1) by {
-                            lemma_step_independent_input_permissions(op1, op2, config1, aug1, config2, aug2);
-                        }
-                        assert(Permission::union_of(op2_input_perms_init).contains(Permission::union_of(op2_output_perms_after_op1)));
-                    }
-
-                    assert(Permission::union_of(op1_input_perms_init).contains(aug4.aug_map[channel2][j])) by {
-                        assert(op1_input_perms_init[op1_inputs.index_of(channel2)] == aug4.aug_map[channel2][j]);
-                        Permission::lemma_union_contains_element(op1_input_perms_init);
-                    }
-
-                    assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
-                        lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
-                    }
-
-                    Permission::lemma_subpermission_disjoint(aug4.aug_map[channel1][i], Permission::union_of(op2_input_perms_init), Permission::union_of(op1_input_perms_init));
-                    Permission::lemma_union_element_disjoint(op1_input_perms_init, aug4.aug_map[channel1][i]);
-
-                    assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]));
-                } else {
-                    let _ = aug3.aug_map[channel2][j];
-                    let _ = aug3.aug_map[channel2][j - 1];
-                    let _ = aug2.aug_map[channel2][j + 1];
-                    let _ = aug2.aug_map[channel2][j];
-                    let _ = aug2.aug_map[channel2][j - 1];
-                    let _ = aug1.aug_map[channel2].drop_first()[j];
-                    let _ = aug1.aug_map[channel2].drop_first()[j - 1];
-
-                    assert(forall |seq: Seq<Permission>, i: int| 0 <= i < seq.len() - 1 ==>
-                        #[trigger] seq.drop_first()[i] == seq[i + 1]);
-
-                    assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])) by {
-                        reveal(Configuration::step);
-                    }
-                }
-
-                // if op2_inputs.contains(channel2) {
-                //     assert(aug4.aug_map[channel2][j] == aug1.aug_map[channel2][j + 1]);
-
-                //     if !op1_inputs.contains(channel2) && !op1_outputs.contains(channel2) {
-                //         // assert(aug2.aug_map[channel2][j + 1] == aug1.aug_map[channel2][j + 1]);
-                //         // assert(aug3.aug_map[channel2][j] == aug2.aug_map[channel2][j + 1]);
-                //     } else if op1_inputs.contains(channel2) && !op1_outputs.contains(channel2) {
-                //         if j == 0 {
-                //             assume(false);
-                //         } else {
-                //             // assert(aug2.aug_map[channel2][j] == aug1.aug_map[channel2][j + 1]);
-                //             // assert(aug3.aug_map[channel2][j - 1] == aug2.aug_map[channel2][j]);
-                //         }
-                //     } else if !op1_inputs.contains(channel2) && op1_outputs.contains(channel2) {
-                //         // assert(aug2.aug_map[channel2][j + 1] == aug1.aug_map[channel2][j + 1]);
-                //         // assert(aug3.aug_map[channel2][j] == aug2.aug_map[channel2][j + 1]);
-                //     } else {
-                //         if j == 0 {
-                //             assume(false);
-                //         } else {
-                //             // assert(aug2.aug_map[channel2].drop_last() =~= aug1.aug_map[channel2].drop_first());
-                //             // assert(aug1.aug_map[channel2].drop_first()[j] == aug1.aug_map[channel2][j + 1]);
-                //             // assert(aug2.aug_map[channel2][j] == aug1.aug_map[channel2][j + 1]);
-                //             // assert(aug3.aug_map[channel2][j - 1] == aug2.aug_map[channel2][j]);
-                //         }
-                //     }
-                // } else {
-                //     assert(aug4.aug_map[channel2][j] == aug1.aug_map[channel2][j]);
-
-                //     if !op1_inputs.contains(channel2) && !op1_outputs.contains(channel2) {
-                //         // assert(aug2.aug_map[channel2][j] == aug1.aug_map[channel2][j]);
-                //         // assert(aug3.aug_map[channel2][j] == aug2.aug_map[channel2][j]);
-                //     } else if op1_inputs.contains(channel2) && !op1_outputs.contains(channel2) {
-                //         if j == 0 {
-
-                //             assume(false);
-                //         } else {
-                //             // assert(aug2.aug_map[channel2][j - 1] == aug1.aug_map[channel2][j]);
-                //             // assert(aug3.aug_map[channel2][j - 1] == aug2.aug_map[channel2][j - 1]);
-                //         }
-                //     } else if !op1_inputs.contains(channel2) && op1_outputs.contains(channel2) {
-                //         // assert(aug2.aug_map[channel2][j] == aug1.aug_map[channel2][j]);
-                //         // assert(aug3.aug_map[channel2][j] == aug2.aug_map[channel2][j]);
-                //     } else {
-                //         if j == 0 {
-                //             assume(false);
-                //         } else {
-                //             // assert(aug2.aug_map[channel2].drop_last() =~= aug1.aug_map[channel2].drop_first());
-                //             // assert(aug1.aug_map[channel2].drop_first()[j - 1] == aug1.aug_map[channel2][j]);
-                //             // assert(aug2.aug_map[channel2][j - 1] == aug1.aug_map[channel2][j]);
-                //             // assert(aug3.aug_map[channel2][j - 1] == aug2.aug_map[channel2][j - 1]);
-                //         }
-                //     }
-                // }
+                lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel1, i, channel2, j);
             } else if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-                // Symmetric
-                if op1_inputs.contains(channel1) && i == 0 {
-
-                    let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
-                    let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
-
-                    let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
-                    let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug3.aug_map[op2_outputs[i]].last());
-
-                    assert(Permission::union_of(op2_input_perms_init).contains(aug4.aug_map[channel2][j])) by {
-                        assert(op2_output_perms_after_op1[op2_outputs.index_of(channel2)] == aug4.aug_map[channel2][j]);
-                        Permission::lemma_union_contains_element(op2_output_perms_after_op1);
-                        assert(Permission::union_of(op2_output_perms_after_op1).contains(aug4.aug_map[channel2][j]));
-
-                        // By validity of the transition (config2, aug2) -> (config3, aug3)
-                        assert(Permission::union_of(op2_input_perms_after_op1).contains(Permission::union_of(op2_output_perms_after_op1)));
-                        assert(op2_input_perms_init =~= op2_input_perms_after_op1) by {
-                            lemma_step_independent_input_permissions(op1, op2, config1, aug1, config2, aug2);
-                        }
-                        assert(Permission::union_of(op2_input_perms_init).contains(Permission::union_of(op2_output_perms_after_op1)));
-                    }
-
-                    assert(Permission::union_of(op1_input_perms_init).contains(aug4.aug_map[channel1][i])) by {
-                        assert(op1_input_perms_init[op1_inputs.index_of(channel1)] == aug4.aug_map[channel1][i]);
-                        Permission::lemma_union_contains_element(op1_input_perms_init);
-                    }
-
-                    assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
-                        lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
-                    }
-
-                    Permission::lemma_subpermission_disjoint(aug4.aug_map[channel2][j], Permission::union_of(op2_input_perms_init), Permission::union_of(op1_input_perms_init));
-                    Permission::lemma_union_element_disjoint(op1_input_perms_init, aug4.aug_map[channel2][j]);
-
-                    assert(aug4.aug_map[channel2][j].disjoint(aug4.aug_map[channel1][i]));
-                } else {
-                    let _ = aug3.aug_map[channel1][i];
-                    let _ = aug3.aug_map[channel1][i - 1];
-                    let _ = aug2.aug_map[channel1][i + 1];
-                    let _ = aug2.aug_map[channel1][i];
-                    let _ = aug2.aug_map[channel1][i - 1];
-                    let _ = aug1.aug_map[channel1].drop_first()[i];
-                    let _ = aug1.aug_map[channel1].drop_first()[i - 1];
-
-                    assert(forall |seq: Seq<Permission>, i: int| 0 <= i < seq.len() - 1 ==>
-                        #[trigger] seq.drop_first()[i] == seq[i + 1]);
-
-                    assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])) by {
-                        reveal(Configuration::step);
-                    }
-                }
+                lemma_consistent_step_commute_aug4_choice_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel2, j, channel1, i);
             }
-
-            // if op2_outputs.contains(channel1) && i == aug4.aug_map[channel1].len() - 1 {
-                // if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-                //     // assert(aug3.aug_map[channel1].len() > 0);
-                //     // assert(aug3.aug_map[channel2].len() > 0);
-
-                //     // let aug3_i = aug3.aug_map[channel1].len() - 1;
-                //     // let aug3_j = aug3.aug_map[channel2].len() - 1;
-
-                //     // assert(aug4.aug_map[channel1][i] == aug3.aug_map[channel1][aug3_i]);
-                //     // assert(aug4.aug_map[channel2][j] == aug3.aug_map[channel2][aug3_j]);
-
-                //     // assert(aug3.valid(config3));
-                //     // assert(config3.is_channel(channel1) && config3.is_channel(channel2));
-                //     // assert(0 <= aug3_i < aug3.aug_map[channel1].len());
-                //     // assert(0 <= aug3_j < aug3.aug_map[channel2].len());
-
-                //     // assert(aug3.aug_map[channel1][aug3_i].disjoint(aug3.aug_map[channel2][aug3_j]));
-
-                //     // assume(false);
-                // } else {
-                //     // assert(aug4.aug_map[channel1][i] == aug3.aug_map[channel1].last());
-                //     assume(false);
-                // }
-
-                // if op2_inputs.contains(channel2) {
-                //     assume(false);
-                // } else {
-                    
-                // }
-                // if channel1 != channel2 {
-                //     if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-                //         assume(false);
-                //     } else {
-                //         if !op2_inputs.contains(channel2) && !op2_outputs.contains(channel2) {
-                //             assume(false);
-                //         } else if op2_inputs.contains(channel2) && !op2_outputs.contains(channel2) {
-                //             assert(aug4.aug_map[channel2] =~= aug3.aug_map[channel2].drop_first());
-                //             assume(false);
-                //         } else if !op2_inputs.contains(channel2) && op2_outputs.contains(channel2) {
-                //             assume(false);
-                //         } else {                            
-                //             assume(false);
-                //         }
-                //     }
-                // } else {
-                //     assume(false);
-                // }
-
-            //     if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-            //         // assume(false);
-            //     } else {
-            //         if !op2_inputs.contains(channel2) && !op2_outputs.contains(channel2) {
-            //             assume(false);
-            //         } else if op2_inputs.contains(channel2) && !op2_outputs.contains(channel2) {
-            //             assert(aug4.aug_map[channel2] =~= aug3.aug_map[channel2].drop_first());
-            //             assume(false);
-            //         } else if !op2_inputs.contains(channel2) && op2_outputs.contains(channel2) {
-            //             assume(false);
-            //         } else {                            
-            //             assume(false);
-            //         }
-            //     }
-            // } else if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-            //     assume(false);
-            // }
         }
     }
 
@@ -729,7 +613,7 @@ proof fn lemma_consistent_step_commute_aug4_choice(
         let input_perms_after_op1 = Seq::new(inputs.len(), |i: int| aug2.aug_map[inputs[i]].first());
         let output_perms_after_op1_op2 = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
 
-        // config1.lemma_step_independence(op1, op2);
+        config1.lemma_step_independence(op1, op2);
         assert(input_perms =~= input_perms_after_op1);
         assert(output_perms =~= output_perms_after_op1_op2);
     }
@@ -740,6 +624,8 @@ proof fn lemma_consistent_step_commute_aug4_choice(
         
         let op2_inputs = config1.get_op_input_channels(op2);
         let op2_outputs = config1.get_op_output_channels(op2);
+
+        config1.lemma_step_independence(op1, op2);
 
         assert(op1_inputs == config1.get_op_input_channels(op1));
         assert(op1_outputs == config1.get_op_output_channels(op1));
@@ -790,7 +676,10 @@ proof fn lemma_consistent_step_commute_aug4_choice(
         let output_perms_after_op1 = Seq::new(op1_outputs.len(), |i: int| aug2.aug_map[op1_outputs[i]].last());
 
         assert(input_perms_after_op2 =~= input_perms_init);
-        assert(output_perms_after_op2_op1 =~= output_perms_after_op1);
+        assert(output_perms_after_op2_op1 =~= output_perms_after_op1) by {
+            config4.lemma_step_valid(op1);
+            config2.lemma_step_valid(op2);
+        }
     }
 }
 

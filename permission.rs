@@ -7,8 +7,9 @@ pub struct Permission {
     pub access: Map<Address, Seq<bool>>,
 }
 
-pub struct PermissionAugmentation {
-    pub aug_map: Map<ChannelIndex, Seq<Permission>>,
+pub struct AugmentedConfiguration {
+    pub config: Configuration,
+    pub aug: Map<ChannelIndex, Seq<Permission>>,
 }
 
 /**
@@ -150,61 +151,60 @@ impl Permission {
     }
 }
 
-impl PermissionAugmentation {
+impl AugmentedConfiguration {
     /**
-     * Whether an augmentation is valid wrt a configuration
+     * Whether an augmented configuration is valid
      */
-    pub open spec fn valid(self, config: Configuration) -> bool
-        recommends config.valid()
+    pub open spec fn valid(self) -> bool
     {
+        self.config.valid() &&
+
         // Domain should be exactly the set of channels
-        self.aug_map.dom() =~= config.graph.channels &&
+        self.aug.dom() =~= self.config.graph.channels &&
 
         // Each permission should be valid
         (forall |channel: ChannelIndex|
-            #[trigger] config.is_channel(channel) ==>
-            self.aug_map[channel].len() == config.channels[channel].len() &&
-            forall |i: int| 0 <= i < self.aug_map[channel].len() ==> (#[trigger] self.aug_map[channel][i]).valid()) &&
+            #[trigger] self.config.is_channel(channel) ==>
+            self.aug[channel].len() == self.config.channels[channel].len() &&
+            forall |i: int| 0 <= i < self.aug[channel].len() ==> (#[trigger] self.aug[channel][i]).valid()) &&
 
         // Permissions should be mutually disjoint
         (forall |channel1: ChannelIndex, channel2: ChannelIndex, i: int, j: int|
-            #![trigger self.aug_map[channel1][i], self.aug_map[channel2][j]]
-            config.is_channel(channel1) && config.is_channel(channel2) &&
-            0 <= i < self.aug_map[channel1].len() && 0 <= j < self.aug_map[channel2].len() &&
+            #![trigger self.aug[channel1][i], self.aug[channel2][j]]
+            self.config.is_channel(channel1) && self.config.is_channel(channel2) &&
+            0 <= i < self.aug[channel1].len() && 0 <= j < self.aug[channel2].len() &&
             (channel1 != channel2 || i != j) ==>
-            self.aug_map[channel1][i].disjoint(self.aug_map[channel2][j]))
+            self.aug[channel1][i].disjoint(self.aug[channel2][j]))
     }
 
-    pub open spec fn get_op_input_permissions(self, config: Configuration, op: OperatorIndex) -> Seq<Permission>
-        recommends self.valid(config)
+    pub open spec fn get_op_input_permissions(self, op: OperatorIndex) -> Seq<Permission>
+        recommends self.valid()
     {
-        let inputs = config.get_op_input_channels(op);
-        Seq::new(inputs.len(), |i: int| self.aug_map[inputs[i]].first())
+        let inputs = self.config.get_op_input_channels(op);
+        Seq::new(inputs.len(), |i: int| self.aug[inputs[i]].first())
     }
 }
 
 /**
  * Defines what it means for an augmented transition/step
- * (config1, aug1) -> (config2, aug2)
+ * aug_config1 -> aug_config2
  * to be consistent,
  */
 pub open spec fn consistent_step(
     op: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
 ) -> bool
 {
-    let inputs = config1.get_op_input_channels(op);
-    let outputs = config1.get_op_output_channels(op);
+    let inputs = aug_config1.config.get_op_input_channels(op);
+    let outputs = aug_config1.config.get_op_output_channels(op);
 
-    let input_perms = Seq::new(inputs.len(), |i: int| aug1.aug_map[inputs[i]].first());
-    let output_perms = Seq::new(outputs.len(), |i: int| aug2.aug_map[outputs[i]].last());
+    let input_perms = Seq::new(inputs.len(), |i: int| aug_config1.aug[inputs[i]].first());
+    let output_perms = Seq::new(outputs.len(), |i: int| aug_config2.aug[outputs[i]].last());
 
-    config1.valid() &&
-    config2.valid() &&
-    config2 == config1.step(op) &&
-    aug1.valid(config1) &&
-    aug2.valid(config2) &&
+    aug_config1.valid() &&
+    aug_config2.valid() &&
+    aug_config2.config == aug_config1.config.step(op) &&
 
     // Four cases:
     // 1. channel not in inputs or outputs
@@ -212,22 +212,19 @@ pub open spec fn consistent_step(
     // 3. channel in outputs only
     // 4. channel in both inputs and outputs
     (forall |channel: ChannelIndex|
-        #[trigger] config1.is_channel(channel) ==> {
+        #[trigger] aug_config1.config.is_channel(channel) ==> {
             if !inputs.contains(channel) && !outputs.contains(channel) {
                 // The permissions are unchanged in case 1
-                aug2.aug_map[channel] =~= aug1.aug_map[channel]
+                aug_config2.aug[channel] =~= aug_config1.aug[channel]
             } else if inputs.contains(channel) && !outputs.contains(channel) {
                 // Case 2
-                // aug2.aug_map[channel].len() == aug1.aug_map[channel].len() - 1 &&
-                aug2.aug_map[channel] =~= aug1.aug_map[channel].drop_first()
+                aug_config2.aug[channel] =~= aug_config1.aug[channel].drop_first()
             } else if !inputs.contains(channel) && outputs.contains(channel) {
                 // Case 3
-                // aug2.aug_map[channel].len() == aug1.aug_map[channel].len() + 1 &&
-                aug2.aug_map[channel].drop_last() =~= aug1.aug_map[channel]
+                aug_config2.aug[channel].drop_last() =~= aug_config1.aug[channel]
             } else {
                 // Case 4
-                // aug2.aug_map[channel].len() == aug1.aug_map[channel].len() &&
-                aug2.aug_map[channel].drop_last() =~= aug1.aug_map[channel].drop_first()
+                aug_config2.aug[channel].drop_last() =~= aug_config1.aug[channel].drop_first()
             }
         }
     ) &&
@@ -236,11 +233,11 @@ pub open spec fn consistent_step(
     Permission::union_of(input_perms).contains(Permission::union_of(output_perms)) &&
 
     // If the operator is a read/write, we require suitable permissions
-    (config1.operators[op].is_Read() ==>
-        Permission::union_of(input_perms).has_read(config1.get_op_input_values(op)[0].as_address())) &&
+    (aug_config1.config.operators[op].is_Read() ==>
+        Permission::union_of(input_perms).has_read(aug_config1.config.get_op_input_values(op)[0].as_address())) &&
         
-    (config1.operators[op].is_Write() ==>
-        Permission::union_of(input_perms).has_write(config1.get_op_input_values(op)[0].as_address()))
+    (aug_config1.config.operators[op].is_Write() ==>
+        Permission::union_of(input_perms).has_write(aug_config1.config.get_op_input_values(op)[0].as_address()))
 }
 
 /**
@@ -249,20 +246,20 @@ pub open spec fn consistent_step(
  */
 pub proof fn lemma_step_independent_input_permissions(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
 )
     requires
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config1.config.fireable(op1),
+        aug_config1.config.fireable(op2),
         op1 != op2,
-        consistent_step(op1, config1, aug1, config2, aug2),
+        consistent_step(op1, aug_config1, aug_config2),
 
     ensures
-        aug1.get_op_input_permissions(config1, op2) == aug2.get_op_input_permissions(config2, op2)
+        aug_config1.get_op_input_permissions(op2) == aug_config2.get_op_input_permissions(op2)
 {
-    config1.lemma_step_independence(op1, op2);
-    assert(aug1.get_op_input_permissions(config1, op2) =~= aug2.get_op_input_permissions(config2, op2));
+    aug_config1.config.lemma_step_independence(op1, op2);
+    assert(aug_config1.get_op_input_permissions(op2) =~= aug_config2.get_op_input_permissions(op2));
 }
 
 /**
@@ -272,25 +269,23 @@ pub proof fn lemma_step_independent_input_permissions(
  */
 proof fn lemma_fireable_disjoint_input_permissions(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
+    aug_config: AugmentedConfiguration,
 )
     requires
-        config1.valid(),
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config.valid(),
+        aug_config.config.fireable(op1),
+        aug_config.config.fireable(op2),
         op1 != op2,
-        aug1.valid(config1),
 
     ensures
-        Permission::union_of(aug1.get_op_input_permissions(config1, op1))
-        .disjoint(Permission::union_of(aug1.get_op_input_permissions(config1, op2))),
+        Permission::union_of(aug_config.get_op_input_permissions(op1)).disjoint(Permission::union_of(aug_config.get_op_input_permissions(op2))),
 {
-    let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
-    let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
+    let op1_input_perms = aug_config.get_op_input_permissions(op1);
+    let op2_input_perms = aug_config.get_op_input_permissions(op2);
 
-    assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
-        if op1_input_perms_init.len() > 0 && op2_input_perms_init.len() > 0 {
-            Permission::lemma_mutually_disjoint_union(op1_input_perms_init, op2_input_perms_init);
+    assert(Permission::union_of(op1_input_perms).disjoint(Permission::union_of(op2_input_perms))) by {
+        if op1_input_perms.len() > 0 && op2_input_perms.len() > 0 {
+            Permission::lemma_mutually_disjoint_union(op1_input_perms, op2_input_perms);
             Permission::lemma_union_disjoint_reasoning_auto();
         } else {
             reveal(Permission::union_of);
@@ -298,6 +293,7 @@ proof fn lemma_fireable_disjoint_input_permissions(
         }
     }
 }
+
 /**
  * Lemma: If both **memory** operators op1 and op2 are fireable in a
  * configuration (and one of op1 and op2 is a write), and op1 and op2
@@ -306,43 +302,42 @@ proof fn lemma_fireable_disjoint_input_permissions(
  */
 proof fn lemma_consistent_steps_have_distinct_memory_addresses(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
-    config3: Configuration, aug3: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
+    aug_config3: AugmentedConfiguration,
 )
     requires
-        config1.valid(),
-        config2.valid(),
-        config3.valid(),
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config1.valid(),
+        aug_config2.valid(),
+        aug_config3.valid(),
+        aug_config1.config.fireable(op1),
+        aug_config1.config.fireable(op2),
         op1 != op2,
 
-        // config1 -> config2 -> config3 is a consistent trace
-        consistent_step(op1, config1, aug1, config2, aug2),
-        consistent_step(op2, config2, aug2, config3, aug3),
+        consistent_step(op1, aug_config1, aug_config2),
+        consistent_step(op2, aug_config2, aug_config3),
 
         // op1 and op2 are memory operators, and at least one of op1 and op2 is a write
-        config1.operators[op1].is_Read() || config1.operators[op1].is_Write(),
-        config1.operators[op2].is_Read() || config1.operators[op2].is_Write(),
-        config1.operators[op1].is_Write() || config1.operators[op2].is_Write(),
+        aug_config1.config.operators[op1].is_Read() || aug_config1.config.operators[op1].is_Write(),
+        aug_config1.config.operators[op2].is_Read() || aug_config1.config.operators[op2].is_Write(),
+        aug_config1.config.operators[op1].is_Write() || aug_config1.config.operators[op2].is_Write(),
 
     ensures
-        config1.get_op_input_values(op1)[0].as_address() != config1.get_op_input_values(op2)[0].as_address()
+        aug_config1.config.get_op_input_values(op1)[0].as_address() != aug_config1.config.get_op_input_values(op2)[0].as_address()
 {
-    let op1_inputs = config1.get_op_input_channels(op1);
-    let op2_inputs = config1.get_op_input_channels(op2);
+    let op1_inputs = aug_config1.config.get_op_input_channels(op1);
+    let op2_inputs = aug_config1.config.get_op_input_channels(op2);
 
-    let op1_address = config1.get_op_input_values(op1)[0].as_address();
-    let op2_address = config1.get_op_input_values(op2)[0].as_address();
+    let op1_address = aug_config1.config.get_op_input_values(op1)[0].as_address();
+    let op2_address = aug_config1.config.get_op_input_values(op2)[0].as_address();
 
-    let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
-    let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
-    // let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
+    let op1_input_perms_init = aug_config1.get_op_input_permissions(op1);
+    let op2_input_perms_init = aug_config1.get_op_input_permissions(op2);
+    // let op2_input_perms_after_op1 = aug_config2.get_op_input_permissions(op2);
 
-    config1.lemma_step_independence(op1, op2);
-    lemma_step_independent_input_permissions(op1, op2, config1, aug1, config2, aug2);
-    lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
+    aug_config1.config.lemma_step_independence(op1, op2);
+    lemma_step_independent_input_permissions(op1, op2, aug_config1, aug_config2);
+    lemma_fireable_disjoint_input_permissions(op1, op2, aug_config1);
     // assert(op2_input_perms_init =~= op2_input_perms_after_op1);
 
     assert(op1_address != op2_address) by {
@@ -351,7 +346,7 @@ proof fn lemma_consistent_steps_have_distinct_memory_addresses(
 
         // Proof by contradiction
         if op1_address == op2_address {
-            if (config1.operators[op1].is_Write() && config1.operators[op2].is_Write()) {
+            if (aug_config1.config.operators[op1].is_Write() && aug_config1.config.operators[op2].is_Write()) {
                 let trigger = op1_input_perm_union.access[op1_address][0];
             }
             reveal(Permission::union_of);
@@ -364,40 +359,40 @@ proof fn lemma_consistent_steps_have_distinct_memory_addresses(
 }
 
 /**
- * Constructs a valid augmentation aug4 for config1.step(op2)
+ * Constructs a valid augmented configuration aug_config4 for config1.step(op2)
  * such that (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
  * is a consistent trace.
  */
 spec fn consistent_steps_commute_augmentation(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
-    config3: Configuration, aug3: PermissionAugmentation,
-) -> PermissionAugmentation
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
+    aug_config3: AugmentedConfiguration,
+) -> AugmentedConfiguration
 {
-    let inputs = config1.get_op_input_channels(op2);
-    let outputs = config1.get_op_output_channels(op2);
+    let inputs = aug_config1.config.get_op_input_channels(op2);
+    let outputs = aug_config1.config.get_op_output_channels(op2);
 
-    let input_perms = aug1.get_op_input_permissions(config1, op2);
-    let output_perms = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
+    let input_perms = aug_config1.get_op_input_permissions(op2);
+    let output_perms = Seq::new(outputs.len(), |i: int| aug_config3.aug[outputs[i]].last());
 
-    let new_aug_map = Map::new(
-        |channel: ChannelIndex| config1.is_channel(channel),
+    let new_aug = Map::new(
+        |channel: ChannelIndex| aug_config1.config.is_channel(channel),
         |channel: ChannelIndex|
             if !inputs.contains(channel) && !outputs.contains(channel) {
-                aug1.aug_map[channel]
+                aug_config1.aug[channel]
             } else if inputs.contains(channel) && !outputs.contains(channel) {
-                aug1.aug_map[channel].drop_first()
+                aug_config1.aug[channel].drop_first()
             } else if !inputs.contains(channel) && outputs.contains(channel) {
                 let output_index = outputs.index_of(channel);
-                aug1.aug_map[channel].push(output_perms[output_index])
+                aug_config1.aug[channel].push(output_perms[output_index])
             } else {
                 let output_index = outputs.index_of(channel);
-                aug1.aug_map[channel].drop_first().push(output_perms[output_index])
+                aug_config1.aug[channel].drop_first().push(output_perms[output_index])
             }
     );
 
-    PermissionAugmentation { aug_map: new_aug_map }
+    AugmentedConfiguration { config: aug_config1.config.step(op2), aug: new_aug }
 }
 
 /**
@@ -408,117 +403,114 @@ spec fn consistent_steps_commute_augmentation(
  */
 proof fn lemma_consistent_steps_commute_augmentation_helper(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
-    config3: Configuration, aug3: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
+    aug_config3: AugmentedConfiguration,
 
     channel1: ChannelIndex, i: int,
     channel2: ChannelIndex, j: int,
 )
     requires
-        config1.valid(),
-        config2.valid(),
-        config3.valid(),
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config1.valid(),
+        aug_config2.valid(),
+        aug_config3.valid(),
+        aug_config1.config.fireable(op1),
+        aug_config1.config.fireable(op2),
         op1 != op2,
 
-        // config1 -> config2 -> config3 is a consistent trace
-        consistent_step(op1, config1, aug1, config2, aug2),
-        consistent_step(op2, config2, aug2, config3, aug3),
+        consistent_step(op1, aug_config1, aug_config2),
+        consistent_step(op2, aug_config2, aug_config3),
 
-        config1.step(op2).step(op1) == config3,
+        aug_config1.config.step(op2).step(op1) == aug_config3.config,
 
         ({
-            let config4 = config1.step(op2);
-            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
 
-            config4.is_channel(channel1) &&
-            config4.is_channel(channel2) &&
+            aug_config4.config.is_channel(channel1) &&
+            aug_config4.config.is_channel(channel2) &&
             
-            0 <= i < aug4.aug_map[channel1].len() &&
-            0 <= j < aug4.aug_map[channel2].len() &&
+            0 <= i < aug_config4.aug[channel1].len() &&
+            0 <= j < aug_config4.aug[channel2].len() &&
             (channel1 != channel2 || i != j) &&
 
             // (channel1, i) is the position of an output permission of op2
-            config1.get_op_output_channels(op2).contains(channel1) &&
-            i == aug4.aug_map[channel1].len() - 1
+            aug_config1.config.get_op_output_channels(op2).contains(channel1) &&
+            i == aug_config4.aug[channel1].len() - 1
         }),
 
     ensures
         ({
-            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
-            aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])
+            let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
+            aug_config4.aug[channel1][i].disjoint(aug_config4.aug[channel2][j])
         }),
 {
-    let config4 = config1.step(op2);
-    let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
 
-    let op1_inputs = config1.get_op_input_channels(op1);
-    let op1_outputs = config1.get_op_output_channels(op1);
+    let op1_inputs = aug_config1.config.get_op_input_channels(op1);
+    let op1_outputs = aug_config1.config.get_op_output_channels(op1);
 
-    let op2_inputs = config1.get_op_input_channels(op2);
-    let op2_outputs = config1.get_op_output_channels(op2);
+    let op2_inputs = aug_config1.config.get_op_input_channels(op2);
+    let op2_outputs = aug_config1.config.get_op_output_channels(op2);
 
-    config1.lemma_step_independence(op1, op2);
+    aug_config1.config.lemma_step_independence(op1, op2);
 
-    assert(aug4.aug_map[channel1][i] == aug3.aug_map[channel1].last());
+    assert(aug_config4.aug[channel1][i] == aug_config3.aug[channel1].last());
 
     if op1_inputs.contains(channel2) && j == 0 {
         // In this case, channel2 is an input channel of op1 and j is exactly the first input
         // to be consumed.
-        // i.e. aug4.aug_map[channel2][j] <= op1 input permissions
-        // aug4.aug_map[channel1][i] <= op2 output permissions
+        // i.e. aug_config4.aug[channel2][j] <= op1 input permissions
+        // aug_config4.aug[channel1][i] <= op2 output permissions
         // Since disjoint(op1 input permissions, op2 input permissions) (by lemma_consistent_steps_have_distinct_memory_addresses)
         // and op2 output permissions <= op2 input permissions
-        // we have disjoint(aug4.aug_map[channel1][i], aug4.aug_map[channel2][j])
+        // we have disjoint(aug_config4.aug[channel1][i], aug_config4.aug[channel2][j])
 
-        let op1_input_perms_init = aug1.get_op_input_permissions(config1, op1);
-        let op2_input_perms_init = aug1.get_op_input_permissions(config1, op2);
+        let op1_input_perms_init = aug_config1.get_op_input_permissions(op1);
+        let op2_input_perms_init = aug_config1.get_op_input_permissions(op2);
 
-        let op2_input_perms_after_op1 = aug2.get_op_input_permissions(config2, op2);
-        let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug3.aug_map[op2_outputs[i]].last());
+        let op2_input_perms_after_op1 = aug_config2.get_op_input_permissions(op2);
+        let op2_output_perms_after_op1 = Seq::new(op2_outputs.len(), |i: int| aug_config3.aug[op2_outputs[i]].last());
 
         Permission::lemma_union_disjoint_reasoning_auto();
 
-        assert(Permission::union_of(op2_input_perms_init).contains(aug4.aug_map[channel1][i])) by {
-            assert(op2_output_perms_after_op1[op2_outputs.index_of(channel1)] == aug4.aug_map[channel1][i]);
-            assert(Permission::union_of(op2_output_perms_after_op1).contains(aug4.aug_map[channel1][i]));
+        assert(Permission::union_of(op2_input_perms_init).contains(aug_config4.aug[channel1][i])) by {
+            assert(op2_output_perms_after_op1[op2_outputs.index_of(channel1)] == aug_config4.aug[channel1][i]);
+            assert(Permission::union_of(op2_output_perms_after_op1).contains(aug_config4.aug[channel1][i]));
 
-            // By validity of the transition (config2, aug2) -> (config3, aug3)
+            // By validity of the transition aug_config2 -> aug_config3
             assert(Permission::union_of(op2_input_perms_after_op1).contains(Permission::union_of(op2_output_perms_after_op1)));
             assert(op2_input_perms_init =~= op2_input_perms_after_op1) by {
-                lemma_step_independent_input_permissions(op1, op2, config1, aug1, config2, aug2);
+                lemma_step_independent_input_permissions(op1, op2, aug_config1, aug_config2);
             }
             assert(Permission::union_of(op2_input_perms_init).contains(Permission::union_of(op2_output_perms_after_op1)));
         }
 
-        assert(Permission::union_of(op1_input_perms_init).contains(aug4.aug_map[channel2][j])) by {
-            assert(op1_input_perms_init[op1_inputs.index_of(channel2)] == aug4.aug_map[channel2][j]);
+        assert(Permission::union_of(op1_input_perms_init).contains(aug_config4.aug[channel2][j])) by {
+            assert(op1_input_perms_init[op1_inputs.index_of(channel2)] == aug_config4.aug[channel2][j]);
         }
 
         assert(Permission::union_of(op1_input_perms_init).disjoint(Permission::union_of(op2_input_perms_init))) by {
-            lemma_fireable_disjoint_input_permissions(op1, op2, config1, aug1);
+            lemma_fireable_disjoint_input_permissions(op1, op2, aug_config1);
         }
 
-        assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]));
+        assert(aug_config4.aug[channel1][i].disjoint(aug_config4.aug[channel2][j]));
     } else {
         // Some terms to trigger QIs
         // Basically a more detailed proof has to do case analysis
         // on the position of (channel2, j) (e.g. whether it's an
         // input/output of op1/op2, and how their positions change
         // as a result)
-        let _ = aug3.aug_map[channel2][j];
-        let _ = aug3.aug_map[channel2][j - 1];
-        let _ = aug2.aug_map[channel2][j + 1];
-        let _ = aug2.aug_map[channel2][j];
-        let _ = aug2.aug_map[channel2][j - 1];
-        let _ = aug1.aug_map[channel2].drop_first()[j - 1];
+        let _ = aug_config3.aug[channel2][j];
+        let _ = aug_config3.aug[channel2][j - 1];
+        let _ = aug_config2.aug[channel2][j + 1];
+        let _ = aug_config2.aug[channel2][j];
+        let _ = aug_config2.aug[channel2][j - 1];
+        let _ = aug_config1.aug[channel2].drop_first()[j - 1];
 
         assert(forall |seq: Seq<Permission>, i: int| 0 <= i < seq.len() - 1 ==>
             #[trigger] seq.drop_first()[i] == seq[i + 1]);
 
-        assert(aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j])) by {
+        assert(aug_config4.aug[channel1][i].disjoint(aug_config4.aug[channel2][j])) by {
             // TODO: try reduce this to some generic facts about Configuration::step
             reveal(Configuration::step);
         }
@@ -532,111 +524,107 @@ proof fn lemma_consistent_steps_commute_augmentation_helper(
  */
 proof fn lemma_consistent_steps_commute_augmentation(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
-    config3: Configuration, aug3: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
+    aug_config3: AugmentedConfiguration,
 )
     requires
-        config1.valid(),
-        config2.valid(),
-        config3.valid(),
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config1.valid(),
+        aug_config2.valid(),
+        aug_config3.valid(),
+        aug_config1.config.fireable(op1),
+        aug_config1.config.fireable(op2),
         op1 != op2,
 
-        // config1 -> config2 -> config3 is a consistent trace
-        consistent_step(op1, config1, aug1, config2, aug2),
-        consistent_step(op2, config2, aug2, config3, aug3),
+        consistent_step(op1, aug_config1, aug_config2),
+        consistent_step(op2, aug_config2, aug_config3),
 
-        config1.step(op2).step(op1) == config3,
+        aug_config1.config.step(op2).step(op1) == aug_config3.config,
 
     ensures
         ({
-            let config4 = config1.step(op2);
-            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
-            
-            consistent_step(op2, config1, aug1, config4, aug4) &&
-            consistent_step(op1, config4, aug4, config3, aug3)
+            let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
+            consistent_step(op2, aug_config1, aug_config4) &&
+            consistent_step(op1, aug_config4, aug_config3)
         }),
 {
-    let config4 = config1.step(op2);
-    let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
     
-    config1.lemma_step_valid(op2);
+    aug_config1.config.lemma_step_valid(op2);
     
-    assert(aug4.valid(config4)) by {
-        let op1_inputs = config1.get_op_input_channels(op1);
-        let op1_outputs = config1.get_op_output_channels(op1);
+    assert(aug_config4.valid()) by {
+        let op1_inputs = aug_config1.config.get_op_input_channels(op1);
+        let op1_outputs = aug_config1.config.get_op_output_channels(op1);
 
-        let op2_inputs = config1.get_op_input_channels(op2);
-        let op2_outputs = config1.get_op_output_channels(op2);
+        let op2_inputs = aug_config1.config.get_op_input_channels(op2);
+        let op2_outputs = aug_config1.config.get_op_output_channels(op2);
         
         assert forall |channel: ChannelIndex|
-            #[trigger] config4.is_channel(channel)
+            #[trigger] aug_config4.config.is_channel(channel)
         implies
-            aug4.aug_map[channel].len() == config4.channels[channel].len() &&
-            (forall |i: int| 0 <= i < aug4.aug_map[channel].len() ==> (#[trigger] aug4.aug_map[channel][i]).valid()) by
+            aug_config4.aug[channel].len() == aug_config4.config.channels[channel].len() &&
+            (forall |i: int| 0 <= i < aug_config4.aug[channel].len() ==> (#[trigger] aug_config4.aug[channel][i]).valid()) by
         {
             reveal(Configuration::step);
         }
 
         assert forall |channel1: ChannelIndex, channel2: ChannelIndex, i: int, j: int|
-            config4.is_channel(channel1) && config4.is_channel(channel2) &&
-            0 <= i < aug4.aug_map[channel1].len() && 0 <= j < aug4.aug_map[channel2].len() &&
+            aug_config4.config.is_channel(channel1) && aug_config4.config.is_channel(channel2) &&
+            0 <= i < aug_config4.aug[channel1].len() && 0 <= j < aug_config4.aug[channel2].len() &&
             (channel1 != channel2 || i != j)
         implies
-            aug4.aug_map[channel1][i].disjoint(aug4.aug_map[channel2][j]) by
+            aug_config4.aug[channel1][i].disjoint(aug_config4.aug[channel2][j]) by
         {
-            if op2_outputs.contains(channel1) && i == aug4.aug_map[channel1].len() - 1 {
-                lemma_consistent_steps_commute_augmentation_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel1, i, channel2, j);
-            } else if op2_outputs.contains(channel2) && j == aug4.aug_map[channel2].len() - 1 {
-                lemma_consistent_steps_commute_augmentation_helper(op1, op2, config1, aug1, config2, aug2, config3, aug3, channel2, j, channel1, i);
+            if op2_outputs.contains(channel1) && i == aug_config4.aug[channel1].len() - 1 {
+                lemma_consistent_steps_commute_augmentation_helper(op1, op2, aug_config1, aug_config2, aug_config3, channel1, i, channel2, j);
+            } else if op2_outputs.contains(channel2) && j == aug_config4.aug[channel2].len() - 1 {
+                lemma_consistent_steps_commute_augmentation_helper(op1, op2, aug_config1, aug_config2, aug_config3, channel2, j, channel1, i);
                 Permission::lemma_union_disjoint_reasoning_auto();
             }
         }
     }
 
-    assert(consistent_step(op2, config1, aug1, config4, aug4)) by {
-        let inputs = config1.get_op_input_channels(op2);
-        let outputs = config1.get_op_output_channels(op2);
+    assert(consistent_step(op2, aug_config1, aug_config4)) by {
+        let inputs = aug_config1.config.get_op_input_channels(op2);
+        let outputs = aug_config1.config.get_op_output_channels(op2);
 
-        let input_perms = Seq::new(inputs.len(), |i: int| aug1.aug_map[inputs[i]].first());
-        let output_perms = Seq::new(outputs.len(), |i: int| aug4.aug_map[outputs[i]].last());
+        let input_perms = Seq::new(inputs.len(), |i: int| aug_config1.aug[inputs[i]].first());
+        let output_perms = Seq::new(outputs.len(), |i: int| aug_config4.aug[outputs[i]].last());
 
-        let input_perms_after_op1 = Seq::new(inputs.len(), |i: int| aug2.aug_map[inputs[i]].first());
-        let output_perms_after_op1_op2 = Seq::new(outputs.len(), |i: int| aug3.aug_map[outputs[i]].last());
+        let input_perms_after_op1 = Seq::new(inputs.len(), |i: int| aug_config2.aug[inputs[i]].first());
+        let output_perms_after_op1_op2 = Seq::new(outputs.len(), |i: int| aug_config3.aug[outputs[i]].last());
 
-        config1.lemma_step_independence(op1, op2);
+        aug_config1.config.lemma_step_independence(op1, op2);
         assert(input_perms =~= input_perms_after_op1);
         assert(output_perms =~= output_perms_after_op1_op2);
     }
 
-    assert(consistent_step(op1, config4, aug4, config3, aug3)) by {
-        let op1_inputs = config4.get_op_input_channels(op1);
-        let op1_outputs = config4.get_op_output_channels(op1);
+    assert(consistent_step(op1, aug_config4, aug_config3)) by {
+        let op1_inputs = aug_config4.config.get_op_input_channels(op1);
+        let op1_outputs = aug_config4.config.get_op_output_channels(op1);
         
-        let op2_inputs = config1.get_op_input_channels(op2);
-        let op2_outputs = config1.get_op_output_channels(op2);
+        let op2_inputs = aug_config1.config.get_op_input_channels(op2);
+        let op2_outputs = aug_config1.config.get_op_output_channels(op2);
 
-        config1.lemma_step_independence(op1, op2);
+        aug_config1.config.lemma_step_independence(op1, op2);
 
-        assert(op1_inputs == config1.get_op_input_channels(op1));
-        assert(op1_outputs == config1.get_op_output_channels(op1));
+        assert(op1_inputs == aug_config1.config.get_op_input_channels(op1));
+        assert(op1_outputs == aug_config1.config.get_op_output_channels(op1));
 
-        assert(op2_inputs == config2.get_op_input_channels(op2));
-        assert(op2_outputs == config2.get_op_output_channels(op2));
+        assert(op2_inputs == aug_config2.config.get_op_input_channels(op2));
+        assert(op2_outputs == aug_config2.config.get_op_output_channels(op2));
 
         assert forall |channel: ChannelIndex|
-            #[trigger] config4.is_channel(channel)
+            #[trigger] aug_config4.config.is_channel(channel)
         implies {
             if !op1_inputs.contains(channel) && !op1_outputs.contains(channel) {
-                aug3.aug_map[channel] =~= aug4.aug_map[channel]
+                aug_config3.aug[channel] =~= aug_config4.aug[channel]
             } else if op1_inputs.contains(channel) && !op1_outputs.contains(channel) {
-                aug3.aug_map[channel] =~= aug4.aug_map[channel].drop_first()
+                aug_config3.aug[channel] =~= aug_config4.aug[channel].drop_first()
             } else if !op1_inputs.contains(channel) && op1_outputs.contains(channel) {
-                aug3.aug_map[channel].drop_last() =~= aug4.aug_map[channel]
+                aug_config3.aug[channel].drop_last() =~= aug_config4.aug[channel]
             } else {
-                aug3.aug_map[channel].drop_last() =~= aug4.aug_map[channel].drop_first()
+                aug_config3.aug[channel].drop_last() =~= aug_config4.aug[channel].drop_first()
             }
         } by
         {
@@ -651,27 +639,27 @@ proof fn lemma_consistent_steps_commute_augmentation(
                 // aug3 = A + [b]
                 // aug4 = [a] + A + [b]
 
-                assert(aug1.aug_map[channel].len() >= 1);
-                assert(aug3.aug_map[channel].len() >= 1);
+                assert(aug_config1.aug[channel].len() >= 1);
+                assert(aug_config3.aug[channel].len() >= 1);
 
-                let a = aug1.aug_map[channel].first();
-                let b = aug3.aug_map[channel].last();
+                let a = aug_config1.aug[channel].first();
+                let b = aug_config3.aug[channel].last();
 
-                assert(aug4.aug_map[channel] =~= seq![a] + aug2.aug_map[channel] + seq![b]);
-                assert(aug3.aug_map[channel] =~= aug2.aug_map[channel] + seq![b]);
+                assert(aug_config4.aug[channel] =~= seq![a] + aug_config2.aug[channel] + seq![b]);
+                assert(aug_config3.aug[channel] =~= aug_config2.aug[channel] + seq![b]);
             }
         }
 
-        let input_perms_after_op2 = Seq::new(op1_inputs.len(), |i: int| aug4.aug_map[op1_inputs[i]].first());
-        let output_perms_after_op2_op1 = Seq::new(op1_outputs.len(), |i: int| aug3.aug_map[op1_outputs[i]].last());
+        let input_perms_after_op2 = Seq::new(op1_inputs.len(), |i: int| aug_config4.aug[op1_inputs[i]].first());
+        let output_perms_after_op2_op1 = Seq::new(op1_outputs.len(), |i: int| aug_config3.aug[op1_outputs[i]].last());
 
-        let input_perms_init = Seq::new(op1_inputs.len(), |i: int| aug1.aug_map[op1_inputs[i]].first());
-        let output_perms_after_op1 = Seq::new(op1_outputs.len(), |i: int| aug2.aug_map[op1_outputs[i]].last());
+        let input_perms_init = Seq::new(op1_inputs.len(), |i: int| aug_config1.aug[op1_inputs[i]].first());
+        let output_perms_after_op1 = Seq::new(op1_outputs.len(), |i: int| aug_config2.aug[op1_outputs[i]].last());
 
         assert(input_perms_after_op2 =~= input_perms_init);
         assert(output_perms_after_op2_op1 =~= output_perms_after_op1) by {
-            config4.lemma_step_valid(op1);
-            config2.lemma_step_valid(op2);
+            aug_config4.config.lemma_step_valid(op1);
+            aug_config2.config.lemma_step_valid(op2);
         }
     }
 }
@@ -682,53 +670,51 @@ proof fn lemma_consistent_steps_commute_augmentation(
  */
 proof fn lemma_consistent_steps_commute(
     op1: OperatorIndex, op2: OperatorIndex,
-    config1: Configuration, aug1: PermissionAugmentation,
-    config2: Configuration, aug2: PermissionAugmentation,
-    config3: Configuration, aug3: PermissionAugmentation,
+    aug_config1: AugmentedConfiguration,
+    aug_config2: AugmentedConfiguration,
+    aug_config3: AugmentedConfiguration,
 )
     requires
-        config1.valid(),
-        config2.valid(),
-        config3.valid(),
-        config1.fireable(op1),
-        config1.fireable(op2),
+        aug_config1.valid(),
+        aug_config2.valid(),
+        aug_config3.valid(),
+        aug_config1.config.fireable(op1),
+        aug_config1.config.fireable(op2),
         op1 != op2,
 
-        // config1 -> config2 -> config3 is a consistent trace
-        consistent_step(op1, config1, aug1, config2, aug2),
-        consistent_step(op2, config2, aug2, config3, aug3),
+        // aug_config1 -> aug_config2 -> aug_config3 is a consistent trace
+        consistent_step(op1, aug_config1, aug_config2),
+        consistent_step(op2, aug_config2, aug_config3),
 
     ensures
-        config1.step(op2).step(op1) == config3,
+        aug_config1.config.step(op2).step(op1) == aug_config3.config,
 
-        // (config1, aug1) -> (config1.step(op2), aug4) -> (config3, aug3)
-        // is a consistent trace
+        // aug_config1 -> aug_config4 -> aug_config3 is a consistent trace
         ({
-            let config4 = config1.step(op2);
-            let aug4 = consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
-            consistent_step(op2, config1, aug1, config4, aug4) &&
-            consistent_step(op1, config4, aug4, config3, aug3)
+            let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
+            consistent_step(op2, aug_config1, aug_config4) &&
+            consistent_step(op1, aug_config4, aug_config3)
         }),
 {
-    assert(config1.step(op2).step(op1) == config3) by {
-        if (config1.operators[op1].is_NonMemory() ||
-            config1.operators[op2].is_NonMemory() ||
-            (config1.operators[op1].is_Read() && config1.operators[op2].is_Read())) {
-            config1.lemma_step_non_memory_commute(op1, op2);
+    assert(aug_config1.config.step(op2).step(op1) == aug_config3.config) by {
+        if (aug_config1.config.operators[op1].is_NonMemory() ||
+            aug_config1.config.operators[op2].is_NonMemory() ||
+            (aug_config1.config.operators[op1].is_Read() && aug_config1.config.operators[op2].is_Read())) {
+            aug_config1.config.lemma_step_non_memory_commute(op1, op2);
         } else {
             // op1 and op2 are accessing different memory locations
-            lemma_consistent_steps_have_distinct_memory_addresses(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+            lemma_consistent_steps_have_distinct_memory_addresses(op1, op2, aug_config1, aug_config2, aug_config3);
 
-            assert(config3 == config1.step(op2).step(op1)) by {
+            assert(aug_config3.config == aug_config1.config.step(op2).step(op1)) by {
                 reveal(Configuration::step);
-                assert(config3.operators =~= config1.step(op2).step(op1).operators);
-                assert(config3.memory =~= config1.step(op2).step(op1).memory);
-                assert(config3.channels =~~= config1.step(op2).step(op1).channels);
+                assert(aug_config3.config.operators =~= aug_config1.config.step(op2).step(op1).operators);
+                assert(aug_config3.config.memory =~= aug_config1.config.step(op2).step(op1).memory);
+                assert(aug_config3.config.channels =~~= aug_config1.config.step(op2).step(op1).channels);
             }
         }
     }
 
-    lemma_consistent_steps_commute_augmentation(op1, op2, config1, aug1, config2, aug2, config3, aug3);
+    lemma_consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
 }
 
 } // verus!

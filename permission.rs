@@ -12,6 +12,11 @@ pub struct AugmentedConfiguration {
     pub aug: Map<ChannelIndex, Seq<Permission>>,
 }
 
+pub struct AugmentedTrace {
+    pub configs: Seq<AugmentedConfiguration>,
+    pub operators: Seq<OperatorIndex>,
+}
+
 /**
  * How many read permissions does a write permission splits into
  * Has to be a positive integer
@@ -185,6 +190,62 @@ impl AugmentedConfiguration {
     }
 }
 
+impl AugmentedTrace {
+    /**
+     * Consistent trace. We allow 0 length trace (which is just a single consistent configuration)
+     */
+    pub open spec fn valid(self) -> bool
+    {
+        self.operators.len() + 1 == self.configs.len() &&
+        self.configs.first().valid() && // in case length = 0
+        (forall |i: int| 0 <= i < self.operators.len() ==>
+            consistent_step(self.operators[i], self.configs[i], self.configs[i + 1]))
+    }
+
+    /**
+     * Length of the trace = number of operators fired in the trace
+     */
+    pub open spec fn len(self) -> nat
+    {
+        self.operators.len() as nat
+    }
+
+    pub open spec fn drop_first(self) -> AugmentedTrace
+        recommends self.len() > 0
+    {
+        AugmentedTrace {
+            configs: self.configs.drop_first(),
+            operators: self.operators.drop_first(),
+        }
+    }
+    
+    pub open spec fn drop_last(self) -> AugmentedTrace
+        recommends self.len() > 0
+    {
+        AugmentedTrace {
+            configs: self.configs.drop_last(),
+            operators: self.operators.drop_last(),
+        }
+    }
+
+    pub open spec fn drop(self, n: int) -> AugmentedTrace
+        recommends self.len() > n
+    {
+        AugmentedTrace {
+            configs: self.configs.take(self.len() - n + 1),
+            operators: self.operators.take(self.len() - n),
+        }
+    }
+
+    pub open spec fn push(self, op: OperatorIndex, config: AugmentedConfiguration) -> AugmentedTrace
+    {
+        AugmentedTrace {
+            configs: self.configs.push(config),
+            operators: self.operators.push(op),
+        }
+    }
+}
+
 /**
  * Defines what it means for an augmented transition/step
  * aug_config1 -> aug_config2
@@ -204,6 +265,7 @@ pub open spec fn consistent_step(
 
     aug_config1.valid() &&
     aug_config2.valid() &&
+    aug_config1.config.fireable(op) &&
     aug_config2.config == aug_config1.config.step(op) &&
 
     // Four cases:
@@ -715,6 +777,137 @@ proof fn lemma_consistent_steps_commute(
     }
 
     lemma_consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
+}
+
+spec fn consistent_trace_commutes(trace: AugmentedTrace) -> AugmentedTrace
+    recommends trace.len() > 0
+    decreases trace.len()
+{
+    if trace.len() <= 1 {
+        trace
+    } else {
+        // config_1 -> ... -> config_{n + 1}
+        let config_np1 = trace.configs.last();
+        let config_n = trace.configs[trace.len() - 1];
+        let config_nm1 = trace.configs[trace.len() - 2];
+
+        let op_n = trace.operators.last();
+        let op_nm1 = trace.operators[trace.len() - 2];
+
+        // config_nm1 -> config_n -> config_np1 is consistent
+        // consistent_step(op_nm1, config_nm1, config_n)
+        // consistent_step(op_n, config_n, config_np1)
+
+        let config_n_alt = consistent_steps_commute_augmentation(op_nm1, op_n, config_nm1, config_n, config_np1);
+        // consistent_step(op_n, config_nm1, config_n_alt)
+        // consistent_step(op_nm1, config_n_alt, config_np1)
+
+        let trace_rest = trace.drop(2).push(op_n, config_n_alt);
+        // trace_rest.valid()
+
+        // assert(trace_rest.len() == trace.len() - 1);
+        let commuted_trace_rest = consistent_trace_commutes(trace_rest);
+
+        commuted_trace_rest.push(op_nm1, config_np1)
+    }
+}
+
+/**
+ * A helper lemma for lemma_consistent_trace_commutes
+ * 
+ * Lemma: If the last operator in the trace is firable at the first config,
+ * then it is also fireable in the third to last configuration.
+ */
+proof fn lemma_fireability_propagation(trace: AugmentedTrace)
+    requires
+        trace.valid(),
+        trace.len() > 1,
+        trace.configs.first().config.fireable(trace.operators.last()),
+        (forall |i: int| 0 <= i < trace.len() - 1 ==> #[trigger] trace.operators[i] != trace.operators.last()),
+
+    ensures
+        trace.configs[trace.len() - 2].config.fireable(trace.operators.last()),
+
+    decreases trace.len()
+{
+    trace.configs.first().config.lemma_step_independence(trace.operators.first(), trace.operators.last());
+    assert(trace.configs[1].config.fireable(trace.operators.last()));
+
+    if trace.len() > 2 {
+        lemma_fireability_propagation(trace.drop_first());
+    }
+}
+
+/**
+ * Lemma: If we have a consistent trace: aug_config_1 ->^o_1 ... ->^o_n aug_config_{n + 1},
+ * firing operators o_1, ..., o_n such that:
+ * - o_n is fireable at aug_config_1,
+ * - o_n not in { o_1, ..., o_{n - 1} }
+ * then we can swap o_n all the way back to the beginning and still get a consistent trace
+ * ending in aug_config_{n + 1}
+ */
+proof fn lemma_consistent_trace_commutes(trace: AugmentedTrace)
+    requires
+        trace.valid(),
+        trace.len() >= 1,
+        trace.configs.first().config.fireable(trace.operators.last()),
+        (forall |i: int| 0 <= i < trace.len() - 1 ==> trace.operators[i] != trace.operators.last()),
+
+    ensures
+        ({
+            let commuted_trace = consistent_trace_commutes(trace);
+
+            commuted_trace.len() == trace.len() &&
+            commuted_trace.configs.first() == trace.configs.first() &&
+            commuted_trace.configs.last() == trace.configs.last() &&
+            commuted_trace.operators.first() == trace.operators.last() &&
+            commuted_trace.operators.drop_first() == trace.operators.drop_last()
+        }),
+
+    decreases trace.len()
+{
+    let commuted_trace = consistent_trace_commutes(trace);
+
+    if trace.len() == 1 {
+        assert(
+            commuted_trace.len() == trace.len() &&
+            commuted_trace.configs.first() == trace.configs.first() &&
+            commuted_trace.configs.last() == trace.configs.last() &&
+            commuted_trace.operators.first() == trace.operators.last() &&
+            commuted_trace.operators.drop_first() == trace.operators.drop_last()
+        );
+    } else {
+        let config_np1 = trace.configs.last();
+        let config_n = trace.configs[trace.len() - 1];
+        let config_nm1 = trace.configs[trace.len() - 2];
+
+        let op_n = trace.operators.last();
+        let op_nm1 = trace.operators[trace.len() - 2];
+
+        // config_nm1 -> config_n -> config_np1 is consistent
+        assert(consistent_step(op_nm1, config_nm1, config_n));
+        assert(consistent_step(op_n, config_n, config_np1));
+
+        let config_n_alt = consistent_steps_commute_augmentation(op_nm1, op_n, config_nm1, config_n, config_np1);
+        lemma_fireability_propagation(trace);
+
+        lemma_consistent_steps_commute(op_nm1, op_n, config_nm1, config_n, config_np1);
+        assert(consistent_step(op_n, config_nm1, config_n_alt));
+        assert(consistent_step(op_nm1, config_n_alt, config_np1));
+
+        let trace_rest = trace.drop(2).push(op_n, config_n_alt);
+
+        let commuted_trace_rest = consistent_trace_commutes(trace_rest);
+        lemma_consistent_trace_commutes(trace_rest);
+
+        let commuted_trace = commuted_trace_rest.push(op_nm1, config_np1);
+
+        // assert(commuted_trace_rest.operators.drop_first() == trace_rest.operators.drop_last());
+        // assert(commuted_trace.operators =~= commuted_trace_rest.operators.push(op_nm1));
+        // assert(commuted_trace.operators.drop_first() =~= commuted_trace_rest.operators.drop_first().push(op_nm1));
+        assert(commuted_trace.operators.drop_first() == trace_rest.operators.drop_last().push(op_nm1));
+        assert(trace_rest.operators.drop_last().push(op_nm1) =~= trace.operators.drop_last());
+    }
 }
 
 } // verus!

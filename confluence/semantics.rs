@@ -183,9 +183,13 @@ impl Configuration {
         recommends self.valid()
     {
         self.graph.operators.contains(op) &&
+
         // Available values in input channels
-        (forall |i: int| 0 <= i < self.get_op_input_channels(op).len() ==>
-            self.channels[#[trigger] self.get_op_input_channels(op)[i]].len() > 0) &&
+        (forall |channel: ChannelIndex|
+            #[trigger] self.is_channel(channel) &&
+            self.get_op_input_channels(op).contains(channel)
+            ==>
+            self.channels[channel].len() > 0) &&
 
         // Available space in output channels (if the output is not one of the input channels)
         if channel_bound() > 0 {
@@ -195,12 +199,6 @@ impl Configuration {
                 self.get_op_output_channels(op).contains(channel)
                 ==>
                 self.channels[channel].len() < channel_bound()
-
-            // forall |i: int|
-            //     0 <= i < self.get_op_output_channels(op).len() &&
-            //     (forall |j: int| 0 <= j < self.get_op_input_channels(op).len() ==> self.get_op_output_channels(op)[i] != #[trigger] self.get_op_output_channels(op)[j])
-            // ==>
-            //     self.channels[#[trigger] self.get_op_output_channels(op)[i]].len() < channel_bound()
         } else {
             true
         }

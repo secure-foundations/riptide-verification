@@ -46,6 +46,11 @@ pub spec fn state_inputs(op: OperatorIndex, state: State) -> Seq<ChannelIndex>;
 pub spec fn state_outputs(op: OperatorIndex, state: State) -> Seq<ChannelIndex>;
 pub spec fn state_computation(op: OperatorIndex, state: State, inputs: Seq<Value>) -> (State, Seq<Value>);
 
+/**
+ * A bound on the size of all channels. 0 means infinite
+ */
+pub spec fn channel_bound() -> nat;
+
 impl Graph {
     pub open spec fn valid(self) -> bool
     {
@@ -161,9 +166,16 @@ impl Configuration {
                 self.get_op_output_channels(op) =~= seq![output],
 
             _ => true,
-        })
+        }) &&
+
+        // Channels should be properly bounded
+        if channel_bound() > 0 {
+            forall |channel: ChannelIndex| #[trigger] self.is_channel(channel) ==> self.channels[channel].len() <= channel_bound()
+        } else {
+            true
+        }
     }
-    
+
     /**
      * Condition for an operator to be fireable in a configuration
      */
@@ -171,8 +183,27 @@ impl Configuration {
         recommends self.valid()
     {
         self.graph.operators.contains(op) &&
+        // Available values in input channels
         (forall |i: int| 0 <= i < self.get_op_input_channels(op).len() ==>
-            self.channels[#[trigger] self.get_op_input_channels(op)[i]].len() > 0)
+            self.channels[#[trigger] self.get_op_input_channels(op)[i]].len() > 0) &&
+
+        // Available space in output channels (if the output is not one of the input channels)
+        if channel_bound() > 0 {
+            forall |channel: ChannelIndex|
+                #[trigger] self.is_channel(channel) &&
+                !self.get_op_input_channels(op).contains(channel) &&
+                self.get_op_output_channels(op).contains(channel)
+                ==>
+                self.channels[channel].len() < channel_bound()
+
+            // forall |i: int|
+            //     0 <= i < self.get_op_output_channels(op).len() &&
+            //     (forall |j: int| 0 <= j < self.get_op_input_channels(op).len() ==> self.get_op_output_channels(op)[i] != #[trigger] self.get_op_output_channels(op)[j])
+            // ==>
+            //     self.channels[#[trigger] self.get_op_output_channels(op)[i]].len() < channel_bound()
+        } else {
+            true
+        }
     }
 
     /**
@@ -241,7 +272,7 @@ impl Configuration {
             memory: memory,
         }
     }
-    
+
     /**
      * Lemma: Stepping a valid configuration gives a valid configuration.
      */
@@ -251,10 +282,15 @@ impl Configuration {
             self.fireable(op),
 
         ensures
-            self.step(op).valid(),
             self.graph =~~= self.step(op).graph,
+            self.step(op).valid(),
     {
         reveal(Configuration::step);
+
+        if channel_bound() > 0 {
+            assert(forall |channel: ChannelIndex| self.is_channel(channel) ==>
+                (#[trigger] self.step(op).channels[channel]).len() <= channel_bound())
+        }
     }
 
     /**
@@ -295,7 +331,7 @@ impl Configuration {
      * Lemma: For two different and non-memor operators op1 and op2,
      * if both of them are fireable in a configuration, then their execution
      * is commutable.
-     * 
+     *
      * i.e. without memory operators, dataflow graph execution is locally confluent.
      */
     pub proof fn lemma_step_non_memory_commute(self, op1: OperatorIndex, op2: OperatorIndex)
@@ -304,7 +340,7 @@ impl Configuration {
             self.fireable(op1),
             self.fireable(op2),
             op1 != op2,
-            
+
             self.operators[op1].is_NonMemory() ||
             self.operators[op2].is_NonMemory() ||
             (self.operators[op1].is_Read() && self.operators[op2].is_Read()),

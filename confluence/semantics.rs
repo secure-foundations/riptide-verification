@@ -242,8 +242,8 @@ impl Configuration {
             },
 
             Operator::Write { .. } => {
-                let address_value = inputs.first();
-                let value = inputs.first();
+                let address_value = inputs[0];
+                let value = inputs[1];
                 (seq![write_default_output()], self.operators, self.memory.insert(address_value.as_address(), value))
             },
         };

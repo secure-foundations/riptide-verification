@@ -528,6 +528,8 @@ class Configuration:
 
     solver: Optional[smt.Solver] = None
 
+    disable_permissions: bool = False
+
     def match(self, other: Configuration) -> Tuple[MatchingResult, Optional[Tuple[permission.Equality, ...]]]:
         """
         Treat self as a pattern and match other against self
@@ -640,8 +642,14 @@ class Configuration:
         return permission_constraints
 
     @staticmethod
-    def get_initial_configuration(graph: DataflowGraph, free_vars: Mapping[str, smt.SMTTerm], solver: Optional[smt.Solver] = None, permission_prefix: str = ""):
-        config = Configuration(graph, free_vars, solver=solver)
+    def get_initial_configuration(
+        graph: DataflowGraph,
+        free_vars: Mapping[str, smt.SMTTerm],
+        solver: Optional[smt.Solver] = None,
+        permission_prefix: str = "",
+        disable_permissions: bool = False,
+    ) -> Configuration:
+        config = Configuration(graph, free_vars, solver=solver, disable_permissions=disable_permissions)
 
         # Initialize operator implementations
         operator_states: List[Operator] = []
@@ -681,7 +689,9 @@ class Configuration:
             channel_states.append(state)
 
         config.channel_states = tuple(channel_states)
-        config.permission_constraints = list(Configuration.get_initial_permission_constraints(config))
+
+        if not disable_permissions:
+            config.permission_constraints = list(Configuration.get_initial_permission_constraints(config))
 
         return config
 
@@ -718,6 +728,7 @@ class Configuration:
             list(self.path_conditions),
             list(self.permission_constraints),
             self.solver,
+            self.disable_permissions,
         )
 
     def write_memory(self, base: smt.SMTTerm, index: smt.SMTTerm, value: smt.SMTTerm):
@@ -749,6 +760,16 @@ class Configuration:
                 assert isinstance(channel_param.annotation, ChannelId), f"ill-formed transition parameter {channel_param}"
                 channel_id = pe_info.inputs[channel_param.annotation.id].id
                 channel_ids.append(channel_id)
+
+        return tuple(channel_ids)
+
+    def get_transition_output_channels(self, pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
+        channel_ids = []
+
+        for action in self.get_transition_output_actions(transition):
+            if isinstance(action, ChannelId) and action.id in pe_info.outputs:
+                for output_channel in pe_info.outputs[action.id]:
+                    channel_ids.append(output_channel.id)
 
         return tuple(channel_ids)
 
@@ -857,6 +878,12 @@ class Configuration:
                 # Channel not ready
                 return False
 
+        # Check for output channel capacity
+        for channel_id in self.get_transition_output_channels(pe_info, transition):
+            bound = self.graph.channels[channel_id].bound
+            if bound is not None and self.channel_states[channel_id].count() >= bound:
+                return False
+
         return True
 
     def is_final(self) -> bool:
@@ -908,34 +935,35 @@ class Configuration:
 
         # If the operation is a store or load
         # Add additional permission constraint of read/write A <= input permissions
-        if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
-            base_pointers = permission.PermissionSolver.find_function_argument_producers(self.graph, pe_info.inputs[0].id)
+        if not self.disable_permissions:
+            if isinstance(operator_state, LoadOperator) or isinstance(operator_state, StoreOperator):
+                base_pointers = permission.PermissionSolver.find_function_argument_producers(self.graph, pe_info.inputs[0].id)
 
-            unique_base_pointers = []
+                unique_base_pointers = []
 
-            # Some pointers not marked with restrict keyword needs to be put together
-            for base_pointer in base_pointers:
-                if base_pointer_mapping is not None:
-                    base_pointer = base_pointer_mapping[base_pointer]
-                if base_pointer not in unique_base_pointers:
-                    unique_base_pointers.append(base_pointer)
+                # Some pointers not marked with restrict keyword needs to be put together
+                for base_pointer in base_pointers:
+                    if base_pointer_mapping is not None:
+                        base_pointer = base_pointer_mapping[base_pointer]
+                    if base_pointer not in unique_base_pointers:
+                        unique_base_pointers.append(base_pointer)
 
-            if len(unique_base_pointers) == 0:
-                assert False, "unsupported permission for store/load"
+                if len(unique_base_pointers) == 0:
+                    assert False, "unsupported permission for store/load"
 
-            if isinstance(operator_state, LoadOperator):
-                # Require at least one read permission for each base pointer
-                for base_pointer in unique_base_pointers:
-                    self.permission_constraints.append(permission.HasRead(base_pointer, permission.DisjointUnion(input_permissions)))
+                if isinstance(operator_state, LoadOperator):
+                    # Require at least one read permission for each base pointer
+                    for base_pointer in unique_base_pointers:
+                        self.permission_constraints.append(permission.HasRead(base_pointer, permission.DisjointUnion(input_permissions)))
 
-            else:
-                self.permission_constraints.append(permission.Inclusion(
-                    permission.DisjointUnion.of(*(
-                        permission.Write(base_pointer)
-                        for base_pointer in unique_base_pointers
-                    )),
-                    permission.DisjointUnion(input_permissions),
-                ))
+                else:
+                    self.permission_constraints.append(permission.Inclusion(
+                        permission.DisjointUnion.of(*(
+                            permission.Write(base_pointer)
+                            for base_pointer in unique_base_pointers
+                        )),
+                        permission.DisjointUnion(input_permissions),
+                    ))
 
         # Update internal permission
         operator_state.internal_permission = self.get_fresh_permission_var(f"{PERMISSION_PREFIX_EXEC}{PERMISSION_PREFIX_INTERNAL}{pe_info.id}-")
@@ -949,18 +977,19 @@ class Configuration:
             configuration_true = self
             configuration_false = self.copy()
 
-            permission_constraint = permission.Inclusion(
-                permission.DisjointUnion.of(*output_permissions),
-                permission.DisjointUnion.of(*input_permissions),
-            )
-
             configuration_true.operator_states[pe_info.id].current_transition = output_value.true_branch
             configuration_true.path_conditions.append(output_value.condition.simplify())
-            configuration_true.permission_constraints.append(permission_constraint)
 
             configuration_false.operator_states[pe_info.id].current_transition = output_value.false_branch
             configuration_false.path_conditions.append(smt.Not(output_value.condition).simplify())
-            configuration_false.permission_constraints.append(permission_constraint)
+
+            if not self.disable_permissions:
+                permission_constraint = permission.Inclusion(
+                    permission.DisjointUnion.of(*output_permissions),
+                    permission.DisjointUnion.of(*input_permissions),
+                )
+                configuration_true.permission_constraints.append(permission_constraint)
+                configuration_false.permission_constraints.append(permission_constraint)
 
             if not configuration_true.check_feasibility():
                 # since the negation is unsat, the condition itself must be valid
@@ -987,12 +1016,13 @@ class Configuration:
 
             # Add permission constraint:
             #   output_permission + new_internal_permission <= input_permission + old_internal_permission
-            permission_constraint = permission.Inclusion(
-                permission.DisjointUnion.of(*output_permissions),
-                permission.DisjointUnion.of(*input_permissions),
-            )
+            if not self.disable_permissions:
+                permission_constraint = permission.Inclusion(
+                    permission.DisjointUnion.of(*output_permissions),
+                    permission.DisjointUnion.of(*input_permissions),
+                )
 
-            self.permission_constraints.append(permission_constraint)
+                self.permission_constraints.append(permission_constraint)
 
             return NextConfiguration(self),
 

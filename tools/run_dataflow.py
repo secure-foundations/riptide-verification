@@ -7,18 +7,20 @@ import semantics.smt as smt
 
 from semantics.dataflow.graph import DataflowGraph
 from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH
-from semantics.dataflow.permission import PermissionSolver, ResultSat, ResultUnsat
+from semantics.dataflow.permission import PermissionSolver, ResultUnsat, FiniteFractionalPA
 
 
 def main():
     parser = ArgumentParser()
     parser.add_argument("-n", type=int, help="Stop when <n> terminating configurations are found")
+    parser.add_argument("--channel-bound", type=int, help="Buffer size at each channel (infinite if not specified)")
+    parser.add_argument("--disable-confluence-check", action="store_const", const=True, default=False, help="Disable confluence check")
     parser.add_argument("dfg", help="A json file (.o2p) describing the dataflow graph")
     parser.add_argument("arg_assignment", nargs="*", help="Set function arguments to constant integers, e.g. len=10")
     args = parser.parse_args()
 
     with open(args.dfg) as dataflow_source:
-        dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_source))
+        dfg = DataflowGraph.load_dataflow_graph(json.load(dataflow_source), args.channel_bound)
 
     function_arg_names = set(arg.variable_name for arg in dfg.function_arguments)
     free_vars: Dict[str, smt.SMTTerm] = {}
@@ -37,7 +39,7 @@ def main():
 
     heap_objects = PermissionSolver.get_static_heap_objects(dfg)
 
-    configs = [(Configuration.get_initial_configuration(dfg, free_vars), 0)]
+    configs = [(Configuration.get_initial_configuration(dfg, free_vars, disable_permissions=args.disable_confluence_check), 0)]
     num_terminating_configs = 0
 
     # Doing a BFS on the state space
@@ -83,19 +85,21 @@ def main():
 
             # Check memory permission constraints
             print(f"  {len(config.permission_constraints)} permission constraint(s)")
-            perm_algebra = permission.FiniteFractionalPA(heap_objects, 4)
-            result = PermissionSolver.solve_constraints(perm_algebra, config.permission_constraints)
-            # for constraint in config.permission_constraints:
-            #     print(f"  {constraint}")
-            if isinstance(result, ResultUnsat):
-                print("unable to find consistent permission assignment, potential data race")
-                break
-            # else:
-            #     assert isinstance(result, ResultSat)
-            #     for var, term in result.solution.items():
-            #         print(f"{var} = {term}")
 
-            print("  found a permission solution")
+            if not args.disable_confluence_check:
+                perm_algebra = FiniteFractionalPA(heap_objects, 4)
+                result = PermissionSolver.solve_constraints(perm_algebra, config.permission_constraints)
+                # for constraint in config.permission_constraints:
+                #     print(f"  {constraint}")
+                if isinstance(result, ResultUnsat):
+                    print("unable to find consistent permission assignment, potential data race")
+                    break
+                # else:
+                #     assert isinstance(result, ResultSat)
+                #     for var, term in result.solution.items():
+                #         print(f"{var} = {term}")
+
+                print("  found a permission solution")
 
 
 if __name__ == "__main__":

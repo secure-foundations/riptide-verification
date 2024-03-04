@@ -32,6 +32,8 @@ class Channel:
     constant: Optional[Constant]
     hold: bool # whether it holds the value and cannot be popped
 
+    bound: Optional[int]
+
 
 @dataclass
 class ProcessingElement:
@@ -51,7 +53,7 @@ class DataflowGraph:
     function_arguments: Tuple[FunctionArgument, ...]
 
     @staticmethod
-    def load_dataflow_graph(obj: Any) -> DataflowGraph:
+    def load_dataflow_graph(obj: Any, default_channel_bound: Optional[int] = None) -> DataflowGraph:
         """
         Load a dataflow graph from an object parsed from the o2p json file (output of the RipTide compiler)
         """
@@ -82,8 +84,8 @@ class DataflowGraph:
                 if input["type"] == "data":
                     input_pe_id = input["ID"]
                     input_pe_port = input["oport"]
-                    channel = Channel(channel_id, input_pe_id, input_pe_port, i, port, None, input["hold"])
-                    
+                    channel = Channel(channel_id, input_pe_id, input_pe_port, i, port, None, input["hold"], default_channel_bound)
+
                     if input_pe_id not in output_channels:
                         output_channels[input_pe_id] = {}
 
@@ -95,10 +97,10 @@ class DataflowGraph:
                 elif input["type"] == "xdata":
                     assert input["name"] in function_argument_names
                     function_arg = FunctionArgument(input["name"])
-                    channel = Channel(channel_id, None, None, i, port, function_arg, input["hold"])
+                    channel = Channel(channel_id, None, None, i, port, function_arg, input["hold"], default_channel_bound)
 
                 elif input["type"] == "const":
-                    channel = Channel(channel_id, None, None, i, port, ConstantValue(input["value"]), input["hold"])
+                    channel = Channel(channel_id, None, None, i, port, ConstantValue(input["value"]), input["hold"], default_channel_bound)
 
                 else:
                     assert False, f"unsupported input channel type {input['type']}"

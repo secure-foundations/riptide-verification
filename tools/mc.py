@@ -160,20 +160,20 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
             # TODO: use this to infer a more exact invariant
             values_in_partition = [ config.channel_states[channel.id].values[index].term for config in partition ]
 
-            # unique_value = values_in_partition[0]
-            # if (len(set(values_in_partition)) == 1 and
-            #     (unique_value.is_symbol() or unique_value.is_constant())):
+            unique_value = values_in_partition[0]
+            if (len(set(values_in_partition)) == 1 and
+                (unique_value.is_symbol() or unique_value.is_constant())):
 
-            #     value = PermissionedValue(unique_value, dummy_perm)
+                value = PermissionedValue(unique_value, dummy_perm)
 
-            #     # print("unique", values_in_partition[0])
-            # else:
-            #     # print("values", set(values_in_partition))
+                # print("unique", values_in_partition[0])
+            else:
+                # print("values", set(values_in_partition))
 
-            value = PermissionedValue(
-                smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
-                dummy_perm,
-            )
+                value = PermissionedValue(
+                    smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
+                    dummy_perm,
+                )
 
             cut_point.channel_states[channel.id].values[index] = value
 
@@ -230,22 +230,22 @@ def construct_cut_point_abstraction(
 
                     for j, other_cut_point in enumerate(cut_points):
                         # print(f"matching against cut point {j}")
-                        if partition_relation(result.config, other_cut_point):
-                            match_result, _ = other_cut_point.match(result.config)
+                        # if partition_relation(result.config, other_cut_point):
+                        #     match_result, _ = other_cut_point.match(result.config)
 
-                            # print(result.config, other_cut_point)
-                            # print(isinstance(match_result, MatchingSuccess), match_result.check_condition())
+                        #     # print(result.config, other_cut_point)
+                        #     # print(isinstance(match_result, MatchingSuccess), match_result.check_condition())
 
-                            # if not isinstance(match_result, MatchingSuccess):
-                            #     print(match_result)
+                        #     # if not isinstance(match_result, MatchingSuccess):
+                        #     #     print(match_result)
 
-                            assert isinstance(match_result, MatchingSuccess) and match_result.check_condition()
+                        #     assert isinstance(match_result, MatchingSuccess) and match_result.check_condition()
 
-                        # match_result, _ = other_cut_point.match(result.config)
-                        # if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
-                        #     # print(match_result.condition.to_smtlib())
-                        #     # assert match_result.check_condition()
-                        #     break
+                        match_result, _ = other_cut_point.match(result.config)
+                        if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
+                            # print(match_result.condition.to_smtlib())
+                            # assert match_result.check_condition()
+                            break
 
                         # if isinstance(match_result, MatchingSuccess) and not match_result.check_condition():
                         #     print("condition failed", match_result.condition.to_smtlib())
@@ -254,7 +254,7 @@ def construct_cut_point_abstraction(
                         # print(cut_point)
                         # print(result.config)
                         unmatched_configs.append(result.config)
-                        remaining_cut_points_to_check.add(i)
+                        # remaining_cut_points_to_check.add(i)
 
         # Still found configurations that are not matched
         # Refine partition and cut points again
@@ -268,7 +268,7 @@ def construct_cut_point_abstraction(
                 for i, partition in enumerate(partitions):
                     if partition_relation(config, partition[0]):
                         partition.append(config)
-                        # remaining_cut_points_to_check.add(i)
+                        remaining_cut_points_to_check.add(i)
                         updated_partition_indices.add(i)
                         break
                 else:

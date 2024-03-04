@@ -564,7 +564,7 @@ class SimulationChecker:
         rhs_substitution = {}
 
         # Rename source cut point vars and refresh exec vars
-        for free_var in permission_constraint.get_free_variables():
+        for free_var in sorted(tuple(permission_constraint.get_free_variables()), key=lambda v: v.name):
             if free_var.name.startswith(f"{PERMISSION_PREFIX_CUT_POINT}{source_index}"):
                 # need consistent renaming here
                 rhs_substitution[free_var] = dataflow.permission.Variable(f"{PERMISSION_PREFIX_EXPANSION}{branch.source_expansion_index}-" + free_var.name)
@@ -756,12 +756,12 @@ class SimulationChecker:
         #     constraints[i] = constraint.substitute_heap_object(heap_object_substitution)
         #     constraint_to_branch_indices[id(constraints[i])] = constraint_to_branch_indices[id(constraint)]
 
+        # for constraint in constraints:
+        #     print(constraint)
+
         logger.debug(f"base pointer mapping: {self.base_pointer_mapping}")
         logger.debug(f"heap objects: {self.heap_objects}")
         logger.debug(f"checking sat of {len(constraints)} memory permission constraints")
-
-        # for constraint in constraints:
-        #     print(constraint)
 
         perm_algebra = dataflow.permission.FiniteFractionalPA(tuple(self.heap_objects), self.permission_fractional_reads)
         result = dataflow.permission.PermissionSolver.solve_constraints(

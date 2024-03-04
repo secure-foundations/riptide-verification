@@ -5,8 +5,11 @@ from argparse import ArgumentParser
 
 import semantics.smt as smt
 
-from semantics.dataflow.graph import DataflowGraph
-from semantics.dataflow.semantics import NextConfiguration, StepException, Configuration, WORD_WIDTH
+from semantics.dataflow import (
+    DataflowGraph, NextConfiguration, StepException,
+    Configuration, WORD_WIDTH,
+)
+
 from semantics.dataflow.permission import PermissionSolver, ResultUnsat, FiniteFractionalPA
 
 

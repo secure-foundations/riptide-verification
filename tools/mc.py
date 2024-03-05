@@ -13,6 +13,14 @@ operators in any configuration to explore (in parallel)
 OperatorSchedule = Callable[[Configuration], Tuple[int, ...]]
 
 
+def deterministic_schedule(config: Configuration) -> Tuple[int, ...]:
+    fireable_operators = [ pe for pe in config.graph.vertices if config.is_fireable(pe.id) ]
+    if len(fireable_operators) != 0:
+        fireable_operators.sort(key=lambda pe: pe.id)
+        return fireable_operators[0].id,
+    return ()
+
+
 def pure_priority_schedule(config: Configuration) -> Tuple[int, ...]:
     """
     Let F be the set of fireable PEs
@@ -78,7 +86,7 @@ def explore_states(
         num_branches = 0
 
         for pe_id in operators_to_fire:
-            results = config.copy().step(pe_id)
+            results = config.copy().step_exhaust(pe_id)
 
             for result in results:
                 assert isinstance(result, NextConfiguration)
@@ -161,8 +169,12 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
             values_in_partition = [ config.channel_states[channel.id].values[index].term for config in partition ]
 
             unique_value = values_in_partition[0]
+
+            # if len(set(values_in_partition)):
+            #     print(unique_value.get_free_variables(), unique_value.get_free_variables().issubset(function_arg_free_vars))
+
             if (len(set(values_in_partition)) == 1 and
-                (unique_value.is_symbol() or unique_value.is_constant())):
+                unique_value.get_free_variables().issubset(function_arg_free_vars)):
 
                 value = PermissionedValue(unique_value, dummy_perm)
 
@@ -222,7 +234,7 @@ def construct_cut_point_abstraction(
             operators_to_fire = schedule(cut_point)
 
             for pe_id in operators_to_fire:
-                results = cut_point.copy().step(pe_id)
+                results = cut_point.copy().step_exhaust(pe_id)
 
                 # match against another cut points
                 for result in results:
@@ -285,7 +297,7 @@ def construct_cut_point_abstraction(
                 f"found {len(unmatched_configs)} unmatched config(s), "
                 f"{num_new} new partition(s), "
                 f"{len(updated_partition_indices) - num_new} updated partition(s), "
-                f"total {len(partitions)} partitions"
+                f"total {len(partitions)} partition(s)"
             )
 
             cut_points_to_check = remaining_cut_points_to_check
@@ -314,7 +326,7 @@ def construct_cut_point_abstraction(
     #         operators_to_fire = schedule(config)
 
     #         for pe_id in operators_to_fire:
-    #             results = cut_point.copy().step(pe_id)
+    #             results = cut_point.copy().step_exhaust(pe_id)
 
     #             # match against another cut points
     #             for result in results:
@@ -368,6 +380,8 @@ def construct_cut_point_abstraction(
     #     return cut_points
 
 
+function_arg_free_vars: Set[smt.SMTTerm] = set()
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("dfg", help="Input dataflow graph")
@@ -382,6 +396,7 @@ def main():
     for function_arg in dfg.function_arguments:
         if function_arg.variable_name not in free_vars:
             free_vars[function_arg.variable_name] = smt.FreshSymbol(smt.BVType(WORD_WIDTH))
+            function_arg_free_vars.add(free_vars[function_arg.variable_name])
 
     initial = Configuration.get_initial_configuration(dfg, free_vars, disable_permissions=True)
 
@@ -417,7 +432,7 @@ def main():
 
     print(f"graph size: {len(dfg.vertices)} operator(s), {len(dfg.channels)} channel(s)")
 
-    cut_points = construct_cut_point_abstraction(configs, pure_priority_schedule)
+    cut_points = construct_cut_point_abstraction(configs, deterministic_schedule)
 
     print("total number of cut points: ", len(cut_points))
 

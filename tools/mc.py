@@ -24,6 +24,13 @@ class ConfigurationShape:
             tuple(channel_state.count() if not channel_state.hold_constant else 0 for channel_state in config.channel_states),
         )
 
+    def __eq__(self, other) -> bool:
+        return (self.operator_transitions == other.operator_transitions and
+                self.channel_size == other.channel_size)
+
+    def __hash__(self) -> int:
+        return hash(self.operator_transitions) ^ hash(self.channel_size)
+
 
 @dataclass
 class ShapePartition:
@@ -110,24 +117,103 @@ class FirebilityDependencyGraph:
 
     Firebility dependency graph is a directed graph where nodes are PEs
     And a -> b iff a in C is fireable only after b is fired
+
+    If a -> None, then a is not fireable any more
+
+    Dependencies are separated into two sets:
+    Input dependency: a i-> b iff a is waiting on b's output
+    Output dependency: a o->b iff b is waiting on a's execution, which will empty a slot in a's output channel
     """
 
     graph: DataflowGraph
-    dependency: Dict[int, Set[int]] = field(default_factory=dict)
 
-    def add_dependencies(self, pe_id1: int, pe_id2: int):
-        if pe_id1 not in self.dependency:
-            self.dependency[pe_id1] = set()
-        self.dependency[pe_id1].add(pe_id2)
+    input_dependency: Dict[int, Set[Optional[int]]] = field(default_factory=dict)
+    output_dependency: Dict[int, Set[Optional[int]]] = field(default_factory=dict)
+
+    def add_input_dependency(self, pe_id1: int, pe_id2: Optional[int]):
+        if pe_id1 not in self.input_dependency:
+            self.input_dependency[pe_id1] = set()
+        self.input_dependency[pe_id1].add(pe_id2)
+
+    def add_output_dependency(self, pe_id1: int, pe_id2: Optional[int]):
+        if pe_id1 not in self.output_dependency:
+            self.output_dependency[pe_id1] = set()
+        self.output_dependency[pe_id1].add(pe_id2)
 
     @staticmethod
     def from_shape(shape: ConfigurationShape) -> FirebilityDependencyGraph:
-        ...
+        graph = FirebilityDependencyGraph(shape.graph)
 
-    def find_loop(self) -> Tuple[int, ...]:
+        for pe, transition in zip(shape.graph.vertices, shape.operator_transitions):
+            input_channel_ids = Configuration.get_transition_input_channels(pe, transition)
+            output_channel_ids = Configuration.get_transition_output_channels(pe, transition)
+
+            for channel_id in input_channel_ids:
+                channel = shape.graph.channels[channel_id]
+
+                if channel.hold:
+                    continue
+
+                if shape.channel_size[channel_id] == 0:
+                    # In particular, if channel.source is None,
+                    # pe.id is not fireable any more (i.e. pe -> None)
+                    graph.add_input_dependency(pe.id, channel.source)
+
+            for channel_id in output_channel_ids:
+                channel = shape.graph.channels[channel_id]
+
+                assert not channel.hold
+
+                if channel.bound and shape.channel_size[channel_id] >= channel.bound:
+                    # In particular, if channel.destination is None,
+                    # pe.id is not fireable any more (i.e. pe -> None)
+                    graph.add_output_dependency(pe.id, channel.destination)
+
+        return graph
+
+    def find_cycle_with_output_dependency(self) -> Tuple[int, ...]:
         """
-        Find one loop in the graph
+        Find one cycle in the graph with output dependency:
+        that is, there is some unused value in the cycle, yet
+        none of the PEs involved is fireable any more
         """
+
+        visited = set()
+        current_path = []
+
+        def visit(pe_id, output_dep_only=False) -> bool:
+            visited.add(pe_id)
+            current_path.append(pe_id)
+
+            neighbors = self.output_dependency.get(pe_id, set())
+
+            if not output_dep_only:
+                neighbors = neighbors.union(self.input_dependency.get(pe_id, set()))
+
+            for neighbor in neighbors:
+                if neighbor in visited:
+                    continue
+
+                if visit(neighbor):
+                    return True
+
+                if neighbor in current_path:
+                    return True
+
+            current_path.pop()
+            return False
+
+        # Start with a node with output dependency
+        for pe_id in self.output_dependency.keys():
+            if pe_id in visited:
+                continue
+
+            assert len(current_path) == 0
+
+            if visit(pe_id, output_dep_only=True):
+                return tuple(current_path)
+
+        return ()
 
 
 """
@@ -509,6 +595,13 @@ def construct_cut_point_abstraction(
 
     shapes_to_check: List[ConfigurationShape] = list(partitions.shapes())
 
+    for shape in partitions.shapes():
+        cycle = check_deadlock(shape)
+        if len(cycle) != 0:
+            print(f"found cycle {cycle} in config")
+            print(partitions[shape][0])
+            assert False
+
     while len(shapes_to_check) != 0:
         unmatched_configs: List[Configuration] = []
 
@@ -556,6 +649,11 @@ def construct_cut_point_abstraction(
             for config in unmatched_configs:
                 shape = ConfigurationShape.from_config(config)
                 if shape not in partitions:
+                    cycle = check_deadlock(shape)
+                    if len(cycle) != 0:
+                        print(f"found cycle {cycle} in config")
+                        print(partitions[shape][0])
+                        assert False
                     num_new += 1
 
                 updated_shapes[shape] = None
@@ -653,7 +751,7 @@ def check_deadlock(shape: ConfigurationShape) -> Tuple[int, ...]:
     """
     Return which operators are in a deadlock
     """
-
+    return FirebilityDependencyGraph.from_shape(shape).find_cycle_with_output_dependency()
 
 
 

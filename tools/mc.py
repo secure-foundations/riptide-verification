@@ -1,9 +1,55 @@
+from __future__ import annotations
 from typing import Callable
+from dataclasses import dataclass, field
+from collections import OrderedDict
 
 import json
 import argparse
 
 from semantics.dataflow import *
+
+
+@dataclass(frozen=True)
+class ConfigurationShape:
+    operator_transitions: Tuple[TransitionFunction, ...]
+    channel_size: Tuple[int, ...]
+
+    @staticmethod
+    def from_config(config: Configuration) -> ConfigurationShape:
+        return ConfigurationShape(
+            tuple(op_state.current_transition for op_state in config.operator_states),
+            tuple(channel_state.count() if not channel_state.hold_constant else 0 for channel_state in config.channel_states),
+        )
+
+
+"""
+Maintains a partition of configurations by their shape
+"""
+@dataclass
+class ShapePartition:
+    shape_map: OrderedDict[ConfigurationShape, List[Configuration]] = field(default_factory=OrderedDict)
+
+    def __contains__(self, config: Configuration) -> bool:
+        return ConfigurationShape.from_config(config) in self.shape_map
+
+    def add(self, config: Configuration):
+        shape = ConfigurationShape.from_config(config)
+        if shape not in self.shape_map:
+            self.shape_map[shape] = []
+        self.shape_map[shape].append(config)
+
+    def add_all(self, configs: Iterable[Configuration]):
+        for config in configs:
+            self.add(config)
+
+    def __getitem__(self, key: ConfigurationShape) -> Iterable[Configuration]:
+        return self.shape_map[key]
+
+    def __len__(self) -> int:
+        return len(self.shape_map)
+
+    def shapes(self) -> Iterable[ConfigurationShape]:
+        return self.shape_map.keys()
 
 
 """
@@ -68,7 +114,6 @@ def explore_states(
 
     # [(config, depth)]
     queue: List[Tuple[Configuration, int]] = [(initial, 0)]
-
     explored_states: List[Configuration] = []
 
     max_branching: int = 1
@@ -101,30 +146,6 @@ def explore_states(
     return tuple(explored_states)
 
 
-def partition_relation(config1: Configuration, config2: Configuration) -> bool:
-    assert config1.graph == config2.graph
-
-    for operator in config1.graph.vertices:
-        op_state1 = config1.operator_states[operator.id]
-        op_state2 = config2.operator_states[operator.id]
-
-        if op_state1.current_transition != op_state2.current_transition:
-            return False
-
-    for channel in config1.graph.channels:
-        channel_state1 = config1.channel_states[channel.id]
-        channel_state2 = config2.channel_states[channel.id]
-
-        if (channel_state1.hold_constant is not None and
-            channel_state2.hold_constant is not None):
-            continue
-
-        if channel_state1.count() != channel_state2.count():
-            return False
-
-    return True
-
-
 def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
     """
     Produce a symbolic configuration that is more general than all of the
@@ -149,10 +170,19 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
 
         if pe.operator == "CF_CFG_OP_INVARIANT":
             assert isinstance(cut_point.operator_states[pe.id], InvariantOperator)
-            # TODO: use this to infer a more exact invariant
-            # values_in_partition = [ config.operator_states[pe.id].value for config in partition ]
 
             if cut_point.operator_states[pe.id].value is not None:
+                # TODO: use this to infer a more exact invariant
+                values_in_partition = [ config.operator_states[pe.id].value for config in partition ]
+
+                # unique_value = values_in_partition[0]
+                # if (len(set(values_in_partition)) == 1 and
+                #     unique_value.get_free_variables().issubset(function_arg_free_vars)):
+                #     value = unique_value
+                # else:
+                #     value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_inv_{pe.id}_%d")
+
+                # cut_point.operator_states[pe.id].value = value
                 cut_point.operator_states[pe.id].value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_inv_{pe.id}_%d")
 
     for channel in cut_point.graph.channels:
@@ -173,21 +203,31 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
             # if len(set(values_in_partition)):
             #     print(unique_value.get_free_variables(), unique_value.get_free_variables().issubset(function_arg_free_vars))
 
-            if (len(set(values_in_partition)) == 1 and
-                unique_value.get_free_variables().issubset(function_arg_free_vars)):
+            # if (len(set(values_in_partition)) == 1 and
+            #     unique_value.get_free_variables().issubset(function_arg_free_vars)):
+            #     value = PermissionedValue(unique_value, dummy_perm)
+            # else:
+            #     value = PermissionedValue(
+            #         smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
+            #         dummy_perm,
+            #     )
 
-                value = PermissionedValue(unique_value, dummy_perm)
+            # cut_point.channel_states[channel.id].values[index] = value
 
-                # print("unique", values_in_partition[0])
-            else:
-                # print("values", set(values_in_partition))
+            cut_point.channel_states[channel.id].values[index] = PermissionedValue(
+                smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
+                dummy_perm,
+            )
 
-                value = PermissionedValue(
-                    smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
-                    dummy_perm,
-                )
-
-            cut_point.channel_states[channel.id].values[index] = value
+    # Add some basic equality constraints:
+    # output channels of the same port must have the same prefixes
+    for pe in cut_point.graph.vertices:
+        for same_port_output_channels in pe.outputs.values():
+            for i, channel1 in enumerate(same_port_output_channels):
+                for channel2 in same_port_output_channels[i + 1:]:
+                    for value1, value2 in zip(cut_point.channel_states[channel1.id].values[::-1], cut_point.channel_states[channel2.id].values[::-1]):
+                        # print(smt.Equals(value1.term, value2.term))
+                        cut_point.path_conditions.append(smt.Equals(value1.term, value2.term))
 
     return cut_point
 
@@ -206,31 +246,22 @@ def construct_cut_point_abstraction(
     Otherwise, we may append new cut points and generate a final version
     """
 
-    partitions: List[List[Configuration]] = []
-
-    # Partition the configurations according to their "shape" (i.e. number of values in each channel)
-    for config in configs:
-        for partition in partitions:
-            if partition_relation(config, partition[0]):
-                partition.append(config)
-                break
-        else:
-            partitions.append([config])
+    partitions = ShapePartition()
+    partitions.add_all(configs)
 
     # Construct a cut point for each partition
-    cut_points = list(generalize_partition(partition) for partition in partitions)
+    cut_points: OrderedDict[ConfigurationShape, Configuration] = \
+        OrderedDict((shape, generalize_partition(partitions[shape])) for shape in partitions.shapes())
 
-    cut_points_to_check = list(range(len(cut_points)))
+    shapes_to_check: List[ConfigurationShape] = list(partitions.shapes())
 
-    while len(cut_points_to_check) != 0:
+    while len(shapes_to_check) != 0:
         unmatched_configs: List[Configuration] = []
 
-        remaining_cut_points_to_check: Set[int] = set()
-
-        for i in cut_points_to_check:
+        for shape in shapes_to_check:
             # print(f"checking cut point {i}")
 
-            cut_point = cut_points[i]
+            cut_point = cut_points[shape]
             operators_to_fire = schedule(cut_point)
 
             for pe_id in operators_to_fire:
@@ -240,19 +271,7 @@ def construct_cut_point_abstraction(
                 for result in results:
                     assert isinstance(result, NextConfiguration)
 
-                    for j, other_cut_point in enumerate(cut_points):
-                        # print(f"matching against cut point {j}")
-                        # if partition_relation(result.config, other_cut_point):
-                        #     match_result, _ = other_cut_point.match(result.config)
-
-                        #     # print(result.config, other_cut_point)
-                        #     # print(isinstance(match_result, MatchingSuccess), match_result.check_condition())
-
-                        #     # if not isinstance(match_result, MatchingSuccess):
-                        #     #     print(match_result)
-
-                        #     assert isinstance(match_result, MatchingSuccess) and match_result.check_condition()
-
+                    for other_cut_point in cut_points.values():
                         match_result, _ = other_cut_point.match(result.config)
                         if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
                             # print(match_result.condition.to_smtlib())
@@ -263,46 +282,36 @@ def construct_cut_point_abstraction(
                         #     print("condition failed", match_result.condition.to_smtlib())
 
                     else:
-                        # print(cut_point)
-                        # print(result.config)
                         unmatched_configs.append(result.config)
-                        # remaining_cut_points_to_check.add(i)
+
+        shapes_to_check = []
 
         # Still found configurations that are not matched
         # Refine partition and cut points again
         if len(unmatched_configs) != 0:
-            # which partitions got updated
-            updated_partition_indices: Set[int] = set()
-
             num_new = 0
 
+            updated_shapes: OrderedDict[ConfigurationShape, None] = OrderedDict()
+
             for config in unmatched_configs:
-                for i, partition in enumerate(partitions):
-                    if partition_relation(config, partition[0]):
-                        partition.append(config)
-                        remaining_cut_points_to_check.add(i)
-                        updated_partition_indices.add(i)
-                        break
-                else:
-                    updated_partition_indices.add(len(partitions))
-                    remaining_cut_points_to_check.add(len(partitions))
-                    partitions.append([config])
-                    cut_points.append(None) # placeholder
+                shape = ConfigurationShape.from_config(config)
+                if config not in partitions:
                     num_new += 1
 
-            for i in updated_partition_indices:
-                cut_points[i] = generalize_partition(partitions[i])
+                updated_shapes[shape] = None
+                partitions.add(config)
+
+            shapes_to_check = list(updated_shapes.keys())
+
+            for shape in shapes_to_check:
+                cut_points[shape] = generalize_partition(partitions[shape])
 
             print(
                 f"found {len(unmatched_configs)} unmatched config(s), "
                 f"{num_new} new partition(s), "
-                f"{len(updated_partition_indices) - num_new} updated partition(s), "
+                f"{len(shapes_to_check) - num_new} updated partition(s), "
                 f"total {len(partitions)} partition(s)"
             )
-
-            cut_points_to_check = remaining_cut_points_to_check
-        else:
-            break
 
     return tuple(cut_points)
 
@@ -400,7 +409,7 @@ def main():
 
     initial = Configuration.get_initial_configuration(dfg, free_vars, disable_permissions=True)
 
-    configs = [initial] # explore_states(initial, pure_priority_schedule, 1)
+    # configs = explore_states(initial, pure_priority_schedule, 200)
 
     # partitions: List[List[Configuration]] = []
 
@@ -430,12 +439,25 @@ def main():
 
     # cut_points = construct_cut_point_abstraction(cut_points, pure_priority_schedule)
 
-    print(f"graph size: {len(dfg.vertices)} operator(s), {len(dfg.channels)} channel(s)")
+    # print(f"graph size: {len(dfg.vertices)} operator(s), {len(dfg.channels)} channel(s)")
 
-    cut_points = construct_cut_point_abstraction(configs, deterministic_schedule)
+    cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule)
 
     print("total number of cut points: ", len(cut_points))
 
 
 if __name__ == "__main__":
     main()
+
+
+"""
+
+C
+
+C/~, c ~ c' iff they have the same shape
+
+For each partition { c_1, ..., c_n } in C/~, infer a cut point p such that |p| >= |c_i| for each i
+
+{ p_1, ..., p_m }
+
+"""

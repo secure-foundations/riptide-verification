@@ -83,12 +83,12 @@ class ShapeGraph:
     def get_shapes(self) -> Iterable[ConfigurationShape]:
         return self.shapes
 
-    def get_incoming_shapes(self, shape: ConfigurationShape) -> Tuple[ConfigurationShape]:
+    def get_incoming_shapes(self, shape: ConfigurationShape) -> Tuple[ConfigurationShape, ...]:
         shape_index = self.shape_to_index[shape]
         indices = sorted(self.incoming_edges.get(shape_index, set()))
         return tuple(self.shapes[index] for index in indices)
 
-    def get_outgoing_shapes(self, shape: ConfigurationShape) -> Tuple[ConfigurationShape]:
+    def get_outgoing_shapes(self, shape: ConfigurationShape) -> Tuple[ConfigurationShape, ...]:
         shape_index = self.shape_to_index[shape]
         indices = sorted(self.outgoing_edges.get(shape_index, set()))
         return tuple(self.shapes[index] for index in indices)
@@ -528,6 +528,8 @@ def check_cut_point_abstraction_deadlock_freedom(
     Check if the cut point abstraction is valid and deadlock-free
     """
 
+    shape_to_cut_point = { ConfigurationShape.from_config(cut_point): cut_point for cut_point in cut_points }
+
     for cut_point in cut_points:
         queue = [cut_point]
 
@@ -546,12 +548,15 @@ def check_cut_point_abstraction_deadlock_freedom(
                 for result in results:
                     assert isinstance(result, NextConfiguration)
 
-                    for other_cut_point in cut_points:
+                    # Check if matched by some cut point
+                    result_shape = ConfigurationShape.from_config(result.config)
+                    if result_shape in shape_to_cut_point:
+                        other_cut_point = shape_to_cut_point[result_shape]
                         match_result, _ = other_cut_point.match(result.config)
                         if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
-                            break
-                    else:
-                        queue.append(result.config)
+                            continue
+
+                    queue.append(result.config)
 
 
 def construct_cut_point_abstraction(
@@ -586,6 +591,10 @@ def construct_cut_point_abstraction(
 
             queue: List[Tuple[Configuration, int]] = [(cut_points[shape], 0)]
 
+            # explored_partition = ShapePartition()
+            # explored_shape_graph = ShapeGraph()
+            # explored_shape_graph.add_shape(shape)
+
             while len(queue) != 0:
                 config, depth = queue.pop(0)
 
@@ -600,15 +609,33 @@ def construct_cut_point_abstraction(
                     for result in results:
                         assert isinstance(result, NextConfiguration)
 
-                        for other_cut_point in cut_points.values():
+                        result_shape = ConfigurationShape.from_config(result.config)
+                        if result_shape in partitions:
+                            other_cut_point = cut_points[result_shape]
                             match_result, _ = other_cut_point.match(result.config)
                             if isinstance(match_result, MatchingSuccess):
                                 if not match_result.check_condition():
                                     unmatched_configs.append(result.config)
-                                break
-
+                            else:
+                                assert False, "same shape without match"
                         else:
+                            # New shape
+                            # explored_partition.add(result.config)
+                            # explored_shape_graph.add_shape(result_shape)
+                            # explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
                             queue.append((result.config, depth + 1))
+
+        # for new_shape in explored_shape_graph.get_shapes():
+        #     # Only add configs in a shape if it
+        #     # * Has more than 1 incoming edge, or
+        #     # * Has no successor
+
+        #     in_deg = len(explored_shape_graph.get_incoming_shapes(new_shape))
+        #     out_deg = len(explored_shape_graph.get_outgoing_shapes(new_shape))
+
+        #     if in_deg > 1 or (in_deg == 1 and new_shape == shape) or out_deg == 0:
+        #         if new_shape in explored_partition:
+        #             unmatched_configs.extend(explored_partition[new_shape])
 
         shapes_to_check = []
 
@@ -616,7 +643,7 @@ def construct_cut_point_abstraction(
         # Refine partition and cut points again
         if len(unmatched_configs) != 0:
             num_new = 0
-            num_skipped = 0
+            # num_skipped = 0
 
             updated_shapes: OrderedDict[ConfigurationShape, None] = OrderedDict()
 
@@ -655,7 +682,7 @@ def construct_cut_point_abstraction(
             print(
                 f"found {len(unmatched_configs)} unmatched config(s), "
                 f"{num_new} new partition(s), "
-                f"{len(updated_shapes) - num_new} updated partition(s) ({num_skipped} skipped), "
+                f"{len(updated_shapes) - num_new} updated partition(s), "
                 f"total {len(partitions)} partition(s)"
             )
 

@@ -529,8 +529,13 @@ def check_cut_point_abstraction_deadlock_freedom(
     """
 
     shape_to_cut_point = { ConfigurationShape.from_config(cut_point): cut_point for cut_point in cut_points }
+    num_final_cut_points = 0
 
     for cut_point in cut_points:
+        if cut_point.is_final():
+            num_final_cut_points += 1
+            continue
+
         queue = [cut_point]
 
         while len(queue) != 0:
@@ -541,12 +546,16 @@ def check_cut_point_abstraction_deadlock_freedom(
                 print(config)
                 assert False
 
+            no_successor = True
+
             for pe_id in schedule(config):
                 results = config.copy().step_exhaust(pe_id)
 
                 # match against another cut points
                 for result in results:
                     assert isinstance(result, NextConfiguration)
+
+                    no_successor = False
 
                     # Check if matched by some cut point
                     result_shape = ConfigurationShape.from_config(result.config)
@@ -557,6 +566,13 @@ def check_cut_point_abstraction_deadlock_freedom(
                             continue
 
                     queue.append(result.config)
+
+            if no_successor:
+                print("found unmatched final state")
+                print(config)
+                assert False
+
+    print(f"{num_final_cut_points} terminating cut point(s)")
 
 
 def construct_cut_point_abstraction(
@@ -589,6 +605,9 @@ def construct_cut_point_abstraction(
         for shape in shapes_to_check:
             # print(f"checking cut point {i}")
 
+            if cut_points[shape].is_final():
+                continue
+
             queue: List[Tuple[Configuration, int]] = [(cut_points[shape], 0)]
 
             # explored_partition = ShapePartition()
@@ -602,12 +621,17 @@ def construct_cut_point_abstraction(
                     unmatched_configs.append(config)
                     continue
 
-                for pe_id in schedule(config):
+                pe_to_fire = schedule(config)
+                no_successor = True
+
+                for pe_id in pe_to_fire:
                     results = config.copy().step_exhaust(pe_id)
 
                     # match against another cut points
                     for result in results:
                         assert isinstance(result, NextConfiguration)
+
+                        no_successor = False
 
                         result_shape = ConfigurationShape.from_config(result.config)
                         if result_shape in partitions:
@@ -624,6 +648,9 @@ def construct_cut_point_abstraction(
                             # explored_shape_graph.add_shape(result_shape)
                             # explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
                             queue.append((result.config, depth + 1))
+
+                if no_successor:
+                    unmatched_configs.append(config)
 
         # for new_shape in explored_shape_graph.get_shapes():
         #     # Only add configs in a shape if it
@@ -724,7 +751,7 @@ def main():
         start_time = time.process_time()
         cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule)
 
-        print(f"found {len(cut_points)} in {round(time.process_time() - start_time, 2)} s")
+        print(f"found {len(cut_points)} cut points in {round(time.process_time() - start_time, 2)} s")
 
         start_time = time.process_time()
         check_cut_point_abstraction_deadlock_freedom(cut_points, pure_priority_schedule)

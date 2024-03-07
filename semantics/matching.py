@@ -10,7 +10,7 @@ from . import smt
 class MatchingResult:
     def merge(self, other: MatchingResult) -> MatchingResult:
         raise NotImplementedError()
-    
+
     @staticmethod
     def match_smt_terms(pattern: smt.SMTTerm, value: smt.SMTTerm) -> MatchingResult:
         if pattern.is_symbol():
@@ -31,13 +31,13 @@ class MatchingSuccess:
     def merge(self, other: MatchingResult) -> MatchingResult:
         if isinstance(other, MatchingFailure):
             return other
-        
+
         assert isinstance(other, MatchingSuccess)
         # assert set(self.substitution.keys()).isdisjoint(set(other.substitution.keys())), \
         #        f"overlapping keys {set(self.substitution.keys())}, {set(other.substitution.keys())}"
-        
+
         overlapping_constraint = []
-        
+
         for overlapping_key in set(self.substitution.keys()).intersection(set(other.substitution.keys())):
             overlapping_constraint.append(smt.Equals(self.substitution[overlapping_key], other.substitution[overlapping_key]))
 
@@ -45,7 +45,7 @@ class MatchingSuccess:
             OrderedDict(tuple(self.substitution.items()) + tuple(other.substitution.items())),
             smt.And(self.condition, other.condition, *overlapping_constraint),
         )
-    
+
     def check_condition(self) -> bool:
         """
         Check if the matching condition is valid

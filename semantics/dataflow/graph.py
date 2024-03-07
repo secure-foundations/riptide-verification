@@ -67,8 +67,13 @@ class DataflowGraph:
         function_arguments: List[FunctionArgument] = []
 
         for arg_obj in obj["function"]["args"]:
-            function_argument_names.add(arg_obj["name"])
-            function_arguments.append(FunctionArgument(arg_obj["name"]))
+            name = arg_obj["name"]
+
+            if name.startswith("%"):
+                name = name[1]
+
+            function_argument_names.add(name)
+            function_arguments.append(FunctionArgument(name))
 
         for i, vertex in enumerate(obj["vertices"]):
             assert i == vertex["ID"]

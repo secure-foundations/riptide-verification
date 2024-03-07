@@ -747,7 +747,8 @@ class Configuration:
     def check_feasibility(self) -> bool:
         return smt.check_sat(self.path_conditions, self.solver)
 
-    def get_transition_input_channels(self, pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
+    @staticmethod
+    def get_transition_input_channels(pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
         signature = inspect.signature(transition, eval_str=True)
         channel_ids = []
 
@@ -763,17 +764,19 @@ class Configuration:
 
         return tuple(channel_ids)
 
-    def get_transition_output_channels(self, pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
+    @staticmethod
+    def get_transition_output_channels(pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
         channel_ids = []
 
-        for action in self.get_transition_output_actions(transition):
+        for action in Configuration.get_transition_output_actions(transition):
             if isinstance(action, ChannelId) and action.id in pe_info.outputs:
                 for output_channel in pe_info.outputs[action.id]:
                     channel_ids.append(output_channel.id)
 
         return tuple(channel_ids)
 
-    def get_transition_output_actions(self, transition: TransitionFunction) -> Tuple[Any, ...]:
+    @staticmethod
+    def get_transition_output_actions(transition: TransitionFunction) -> Tuple[Any, ...]:
         return_annotation = inspect.signature(transition, eval_str=True).return_annotation
 
         if return_annotation is Branching:
@@ -869,7 +872,7 @@ class Configuration:
         pe_info = self.graph.vertices[pe_id]
         operator_state = self.operator_states[pe_info.id]
         transition = operator_state.current_transition
-        input_channel_ids = self.get_transition_input_channels(pe_info, transition)
+        input_channel_ids = Configuration.get_transition_input_channels(pe_info, transition)
 
         # Check for input channel availability
         # print(f"{pe_info.id} {input_channel_ids}")
@@ -879,7 +882,7 @@ class Configuration:
                 return False
 
         # Check for output channel capacity
-        for channel_id in self.get_transition_output_channels(pe_info, transition):
+        for channel_id in Configuration.get_transition_output_channels(pe_info, transition):
             bound = self.graph.channels[channel_id].bound
             if bound is not None and self.channel_states[channel_id].count() >= bound:
                 return False
@@ -902,7 +905,7 @@ class Configuration:
         pe_info = self.graph.vertices[pe_id]
         operator_state = self.operator_states[pe_info.id]
         transition = operator_state.current_transition
-        input_channel_ids = self.get_transition_input_channels(pe_info, transition)
+        input_channel_ids = Configuration.get_transition_input_channels(pe_info, transition)
 
         if not self.is_fireable(pe_id):
             return ()
@@ -923,7 +926,7 @@ class Configuration:
         # print(f"final transition {operator_state.current_transition} {self.get_transition_input_channels(pe_info, operator_state.current_transition)}")
 
         # Process output behaviors
-        output_actions = self.get_transition_output_actions(transition)
+        output_actions = Configuration.get_transition_output_actions(transition)
 
         if len(output_actions) == 0:
             output_values = ()

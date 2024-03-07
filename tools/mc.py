@@ -6,6 +6,7 @@ from collections import OrderedDict
 import json
 import time
 import argparse
+import itertools
 
 from semantics.dataflow import *
 
@@ -397,6 +398,9 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
     # Clear path conditions
     cut_point.path_conditions = []
 
+    # Map each cut point value to a list of corresponding terms in the configs in the partition
+    value_correspondence: OrderedDict[smt.SMTTerm, Tuple[smt.SMTTerm, ...]] = OrderedDict()
+
     for pe in cut_point.graph.vertices:
         # The transition is already set, we now need to infer internal state values
         # if they are required (e.g. for Invariant)
@@ -405,37 +409,18 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
             assert isinstance(cut_point.operator_states[pe.id], InvariantOperator)
 
             if cut_point.operator_states[pe.id].value is not None:
-                # TODO: use this to infer a more exact invariant
-                # values_in_partition = [ config.operator_states[pe.id].value for config in partition ]
-
-                # unique_value = values_in_partition[0]
-                # if (len(set(values_in_partition)) == 1 and
-                #     unique_value.get_free_variables().issubset(function_arg_free_vars)):
-                #     value = unique_value
-                # else:
-                #     value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_inv_{pe.id}_%d")
-
-                # cut_point.operator_states[pe.id].value = value
-                cut_point.operator_states[pe.id].value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_inv_{pe.id}_%d")
+                value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_inv_{pe.id}_%d")
+                value_correspondence[value] = tuple(config.operator_states[pe.id].value for config in partition)
+                cut_point.operator_states[pe.id].value = value
 
     for channel in cut_point.graph.channels:
         if channel.hold or channel.constant is not None:
             continue
 
-        num_values = cut_point.channel_states[channel.id].count()
-
-        # Clear all values for now
-        # cut_point.channel_states[channel.id].values = []
-
-        for index in range(num_values):
-            # TODO: use this to infer a more exact invariant
-            # values_in_partition = [ config.channel_states[channel.id].values[index].term for config in partition ]
-            # unique_value = values_in_partition[0]
-
-            cut_point.channel_states[channel.id].values[index] = PermissionedValue(
-                smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d"),
-                dummy_perm,
-            )
+        for index in range(cut_point.channel_states[channel.id].count()):
+            value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_channel_{channel.id}_{index}_%d")
+            value_correspondence[value] = tuple(config.channel_states[channel.id].values[index].term for config in partition)
+            cut_point.channel_states[channel.id].values[index] = PermissionedValue(value, dummy_perm)
 
     # Add some basic equality constraints:
     # output channels of the same port must have the same prefixes
@@ -460,53 +445,72 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
     #                     # so infer an equality between them
     #                     cut_point.path_conditions.append(smt.Equals(value1.term, value2.term))
 
-    # Infer some constraints about whether a value has to be zero or non-zero
-    for channel in cut_point.graph.channels:
-        if channel.hold:
-            continue
+    all_path_conditions: Tuple[smt.SMTTerm, ...] = tuple(smt.And(config.path_conditions) for config in partition)
 
-        for index in range(cut_point.channel_states[channel.id].count()):
+    unary_predicates = [
+        lambda t: smt.Equals(t, smt.BVConst(0, WORD_WIDTH)),
+    ]
 
-            cut_point_value = cut_point.channel_states[channel.id].values[index].term
+    # Learn unary predicates from the values
+    for cut_point_value, partition_values in value_correspondence.items():
+        for predicate in unary_predicates:
+            with smt.push_solver(cut_point.solver):
+                # Check if the predicate holds for all values in partition configs
+                cut_point.solver.add_assertion(smt.Not(smt.And(
+                    smt.Implies(path_condition, predicate(partition_value))
+                    for path_condition, partition_value in zip(all_path_conditions, partition_values, strict=True)
+                )))
 
-            all_zeroes = True
-            all_non_zeroes = True
+                if not cut_point.solver.solve():
+                    # The predicate is valid
+                    cut_point.path_conditions.append(predicate(cut_point_value))
+                    continue
 
-            for config in partition:
-                value = config.channel_states[channel.id].values[index].term
+            # Also check the negation
+            with smt.push_solver(cut_point.solver):
+                # Check if the predicate holds for all values in partition configs
+                cut_point.solver.add_assertion(smt.Not(smt.And(
+                    smt.Implies(path_condition, smt.Not(predicate(partition_value)))
+                    for path_condition, partition_value in zip(all_path_conditions, partition_values, strict=True)
+                )))
 
-                with smt.push_solver(config.solver):
-                    for condition in config.path_conditions:
-                        config.solver.add_assertion(condition)
+                if not cut_point.solver.solve():
+                    # The predicate is valid
+                    cut_point.path_conditions.append(smt.Not(predicate(cut_point_value)))
 
-                    if all_zeroes:
-                        with smt.push_solver(config.solver):
-                            config.solver.add_assertion(smt.Not(smt.Equals(value, smt.BVConst(0, WORD_WIDTH))))
+    # Learn binary predicates
+    # NOTE: this seems to make things a lot slower without much help in reducing the state space
+    # binary_predicates = [
+    #     lambda t, s: smt.BVSLT(t, s),
+    # ]
+    # for (cut_point_value1, partition_values1), (cut_point_value2, partition_values2) in itertools.permutations(value_correspondence.items(), 2):
+    #     for predicate in binary_predicates:
+    #         with smt.push_solver(cut_point.solver):
+    #             # Check if the predicate holds for all values in partition configs
+    #             cut_point.solver.add_assertion(smt.Not(smt.And(
+    #                 smt.Implies(path_condition, predicate(partition_value1, partition_value2))
+    #                 for path_condition, partition_value1, partition_value2 in zip(all_path_conditions, partition_values1, partition_values2, strict=True)
+    #             )))
 
-                            if config.solver.solve():
-                                all_zeroes = False
-                            else:
-                                all_non_zeroes = False
+    #             if not cut_point.solver.solve():
+    #                 # The predicate is valid
+    #                 # print("learned binary", predicate(cut_point_value1, cut_point_value2))
+    #                 cut_point.path_conditions.append(predicate(cut_point_value1, cut_point_value2))
+    #                 continue
 
-                    if all_non_zeroes:
-                        with smt.push_solver(config.solver):
-                            config.solver.add_assertion(smt.Equals(value, smt.BVConst(0, WORD_WIDTH)))
+    #         # Also check the negation
+    #         with smt.push_solver(cut_point.solver):
+    #             # Check if the predicate holds for all values in partition configs
+    #             cut_point.solver.add_assertion(smt.Not(smt.And(
+    #                 smt.Implies(path_condition, smt.Not(predicate(partition_value1, partition_value2)))
+    #                 for path_condition, partition_value1, partition_value2 in zip(all_path_conditions, partition_values1, partition_values2, strict=True)
+    #             )))
 
-                            if config.solver.solve():
-                                all_non_zeroes = False
-                            else:
-                                all_zeroes = False
-
-                if not all_zeroes and not all_non_zeroes:
-                    break
-
-            assert not (all_zeroes and all_non_zeroes)
-
-            if all_zeroes:
-                cut_point.path_conditions.append(smt.Equals(cut_point_value, smt.BVConst(0, WORD_WIDTH)))
-
-            elif all_non_zeroes:
-                cut_point.path_conditions.append(smt.Not(smt.Equals(cut_point_value, smt.BVConst(0, WORD_WIDTH))))
+    #             if not cut_point.solver.solve():
+    #                 # The predicate is valid
+    #                 # print("learned binary", smt.Not(predicate(cut_point_value1, cut_point_value2)))
+    #                 cut_point.path_conditions.append(smt.Not(predicate(cut_point_value1, cut_point_value2)))
+    #                 continue
 
     # for config in partition:
     #     match_result, _ = cut_point.match(config)
@@ -578,7 +582,7 @@ def check_cut_point_abstraction_deadlock_freedom(
 def construct_cut_point_abstraction(
     configs: Iterable[Configuration],
     schedule: OperatorSchedule,
-    unmatch_explore_depth: int = 30,
+    unmatch_explore_depth: int = 10,
     # exact_partitions: ShapePartition,
     # offset: int = 0,
 ) -> Tuple[Configuration, ...]:

@@ -286,7 +286,7 @@ def explore_states(
     shape_graph = ShapeGraph()
 
     symbolic_execution_time = 0.0
-    start_time = time.time()
+    start_time = time.process_time()
 
     try:
         # BFS on the symbolic configurations
@@ -338,7 +338,7 @@ def explore_states(
                     f"{len(explored_states)} state(s) explored, depth {depth}, "
                     f"{len(partitions)} partition(s) found ({num_redundant} redundant, {num_final} final, {num_initial} initial, {num_branching} branching, {num_merging} merging, {num_other} other), "
                     f"symbolic execution time {round(symbolic_execution_time, 2)} s, "
-                    f"total time {round(time.time() - start_time, 2)} s"
+                    f"total time {round(time.process_time() - start_time, 2)} s"
                 )
                 print(*zip(other_fan_ins, other_fan_outs))
 
@@ -350,9 +350,9 @@ def explore_states(
             num_branches = 0
 
             for pe_id in operators_to_fire:
-                start = time.time()
+                start = time.process_time()
                 results = config.copy().step_exhaust(pe_id)
-                symbolic_execution_time += time.time() - start
+                symbolic_execution_time += time.process_time() - start
 
                 for result in results:
                     assert isinstance(result, NextConfiguration)
@@ -520,10 +520,44 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
     return cut_point
 
 
-def construct_cut_point_abstraction(
-    # cut_points: Tuple[Configuration, ...],
-    configs: Tuple[Configuration, ...],
+def check_cut_point_abstraction_deadlock_freedom(
+    cut_points: Tuple[Configuration, ...],
     schedule: OperatorSchedule,
+):
+    """
+    Check if the cut point abstraction is valid and deadlock-free
+    """
+
+    for cut_point in cut_points:
+        queue = [cut_point]
+
+        while len(queue) != 0:
+            config = queue.pop(0)
+
+            if len(check_deadlock(ConfigurationShape.from_config(config))) != 0:
+                print("found deadlock at a potentially reachable config")
+                print(config)
+                assert False
+
+            for pe_id in schedule(config):
+                results = config.copy().step_exhaust(pe_id)
+
+                # match against another cut points
+                for result in results:
+                    assert isinstance(result, NextConfiguration)
+
+                    for other_cut_point in cut_points:
+                        match_result, _ = other_cut_point.match(result.config)
+                        if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
+                            break
+                    else:
+                        queue.append(result.config)
+
+
+def construct_cut_point_abstraction(
+    configs: Iterable[Configuration],
+    schedule: OperatorSchedule,
+    unmatch_explore_depth: int = 30,
     # exact_partitions: ShapePartition,
     # offset: int = 0,
 ) -> Tuple[Configuration, ...]:
@@ -544,47 +578,37 @@ def construct_cut_point_abstraction(
 
     shapes_to_check: List[ConfigurationShape] = list(partitions.shapes())
 
-    for shape in partitions.shapes():
-        cycle = check_deadlock(shape)
-        if len(cycle) != 0:
-            print(f"found cycle {cycle} in config")
-            print(partitions[shape][0])
-            assert False
-
     while len(shapes_to_check) != 0:
         unmatched_configs: List[Configuration] = []
 
         for shape in shapes_to_check:
             # print(f"checking cut point {i}")
 
-            cut_point = cut_points[shape]
-            operators_to_fire = schedule(cut_point)
+            queue: List[Tuple[Configuration, int]] = [(cut_points[shape], 0)]
 
-            for pe_id in operators_to_fire:
-                results = cut_point.copy().step_exhaust(pe_id)
+            while len(queue) != 0:
+                config, depth = queue.pop(0)
 
-                # match against another cut points
-                for result in results:
-                    assert isinstance(result, NextConfiguration)
+                if depth >= unmatch_explore_depth:
+                    unmatched_configs.append(config)
+                    continue
 
-                    # if (ConfigurationShape.from_config(result.config) not in exact_partitions and
-                    #     ConfigurationShape.from_config(cut_point) in exact_partitions):
-                    #     print(cut_point)
-                    #     print(result.config)
-                    #     exit()
+                for pe_id in schedule(config):
+                    results = config.copy().step_exhaust(pe_id)
 
-                    for other_cut_point in cut_points.values():
-                        match_result, _ = other_cut_point.match(result.config)
-                        if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
-                            # print(match_result.condition.to_smtlib())
-                            # assert match_result.check_condition()
-                            break
+                    # match against another cut points
+                    for result in results:
+                        assert isinstance(result, NextConfiguration)
 
-                        # if isinstance(match_result, MatchingSuccess) and not match_result.check_condition():
-                        #     print("condition failed", match_result.condition.to_smtlib())
+                        for other_cut_point in cut_points.values():
+                            match_result, _ = other_cut_point.match(result.config)
+                            if isinstance(match_result, MatchingSuccess):
+                                if not match_result.check_condition():
+                                    unmatched_configs.append(result.config)
+                                break
 
-                    else:
-                        unmatched_configs.append(result.config)
+                        else:
+                            queue.append((result.config, depth + 1))
 
         shapes_to_check = []
 
@@ -592,17 +616,19 @@ def construct_cut_point_abstraction(
         # Refine partition and cut points again
         if len(unmatched_configs) != 0:
             num_new = 0
+            num_skipped = 0
 
             updated_shapes: OrderedDict[ConfigurationShape, None] = OrderedDict()
 
             for config in unmatched_configs:
                 shape = ConfigurationShape.from_config(config)
                 if shape not in partitions:
-                    cycle = check_deadlock(shape)
-                    if len(cycle) != 0:
-                        print(f"found cycle {cycle} in config")
-                        print(partitions[shape][0])
-                        assert False
+                    # Try to run the config further to see if it ends up in an existing shape
+                    # cycle = check_deadlock(shape)
+                    # if len(cycle) != 0:
+                    #     print(f"found cycle {cycle} in config")
+                    #     print(partitions[shape][0])
+                    #     assert False
                     num_new += 1
 
                 updated_shapes[shape] = None
@@ -613,14 +639,27 @@ def construct_cut_point_abstraction(
             for shape in shapes_to_check:
                 cut_points[shape] = generalize_partition(partitions[shape])
 
+            # for shape in updated_shapes:
+            #     new_cut_point = generalize_partition(partitions[shape])
+
+            #     if shape in cut_points:
+            #         # If the cut point has not become more general, no need to recheck
+            #         match_result, _ = cut_points[shape].match(new_cut_point)
+            #         if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
+            #             num_skipped += 1
+            #             continue
+
+            #     cut_points[shape] = new_cut_point
+            #     shapes_to_check.append(shape)
+
             print(
                 f"found {len(unmatched_configs)} unmatched config(s), "
                 f"{num_new} new partition(s), "
-                f"{len(shapes_to_check) - num_new} updated partition(s), "
+                f"{len(updated_shapes) - num_new} updated partition(s) ({num_skipped} skipped), "
                 f"total {len(partitions)} partition(s)"
             )
 
-    return tuple(cut_points)
+    return tuple(cut_points.values())
 
 
 def check_deadlock(shape: ConfigurationShape) -> Tuple[int, ...]:
@@ -628,7 +667,6 @@ def check_deadlock(shape: ConfigurationShape) -> Tuple[int, ...]:
     Return which operators are in a deadlock
     """
     return FirebilityDependencyGraph.from_shape(shape).find_cycle_with_output_dependency()
-
 
 
 function_arg_free_vars: Set[smt.SMTTerm] = set()
@@ -656,9 +694,17 @@ def main():
         # for part in partitions.shape_map.values():
         #     print(part[0])
 
+        start_time = time.process_time()
         cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule)
 
-        print("total number of cut points: ", len(cut_points))
+        print(f"found {len(cut_points)} in {round(time.process_time() - start_time, 2)} s")
+
+        start_time = time.process_time()
+        check_cut_point_abstraction_deadlock_freedom(cut_points, pure_priority_schedule)
+        print(f"verified cut points in {round(time.process_time() - start_time, 2)} s")
+
+        # for cut_point in cut_points:
+        #     print(cut_point)
 
 
 if __name__ == "__main__":

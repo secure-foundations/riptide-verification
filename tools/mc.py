@@ -413,6 +413,17 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
                 value_correspondence[value] = tuple(config.operator_states[pe.id].value for config in partition)
                 cut_point.operator_states[pe.id].value = value
 
+        elif pe.operator == "STREAM_FU_CFG_T":
+            assert isinstance(cut_point.operator_states[pe.id], StreamOperator)
+
+            if cut_point.operator_states[pe.id].current is not None:
+                current_value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_stream_current_{pe.id}_%d")
+                end_value = smt.FreshSymbol(smt.BVType(WORD_WIDTH), f"cut_point_stream_end_{pe.id}_%d")
+                value_correspondence[current_value] = tuple(config.operator_states[pe.id].current for config in partition)
+                value_correspondence[end_value] = tuple(config.operator_states[pe.id].end for config in partition)
+                cut_point.operator_states[pe.id].current = current_value
+                cut_point.operator_states[pe.id].end = end_value
+
     for channel in cut_point.graph.channels:
         if channel.hold or channel.constant is not None:
             continue
@@ -532,25 +543,33 @@ def check_cut_point_abstraction_deadlock_freedom(
     Check if the cut point abstraction is valid and deadlock-free
     """
 
+    reachable_shapes: Set[ConfigurationShape] = set()
+
     shape_to_cut_point = { ConfigurationShape.from_config(cut_point): cut_point for cut_point in cut_points }
     num_final_cut_points = 0
 
     for cut_point in cut_points:
-        if cut_point.is_final():
-            num_final_cut_points += 1
-            continue
-
         queue = [cut_point]
 
         while len(queue) != 0:
             config = queue.pop(0)
 
-            if len(check_deadlock(ConfigurationShape.from_config(config))) != 0:
+            shape = ConfigurationShape.from_config(config)
+            reachable_shapes.add(shape)
+
+            if len(check_deadlock(shape)) != 0:
                 print("found deadlock at a potentially reachable config")
                 print(config)
                 assert False
 
-            no_successor = True
+            if config.is_final():
+                if config == cut_point:
+                    num_final_cut_points += 1
+                    break
+
+                print("found unmatched final state")
+                print(config)
+                assert False
 
             for pe_id in schedule(config):
                 results = config.copy().step_exhaust(pe_id)
@@ -558,8 +577,6 @@ def check_cut_point_abstraction_deadlock_freedom(
                 # match against another cut points
                 for result in results:
                     assert isinstance(result, NextConfiguration)
-
-                    no_successor = False
 
                     # Check if matched by some cut point
                     result_shape = ConfigurationShape.from_config(result.config)
@@ -571,18 +588,14 @@ def check_cut_point_abstraction_deadlock_freedom(
 
                     queue.append(result.config)
 
-            if no_successor:
-                print("found unmatched final state")
-                print(config)
-                assert False
-
     print(f"{num_final_cut_points} terminating cut point(s)")
+    print(f"{len(reachable_shapes)} reachable shape(s) in the cut point abstraction")
 
 
 def construct_cut_point_abstraction(
     configs: Iterable[Configuration],
     schedule: OperatorSchedule,
-    unmatch_explore_depth: int = 10,
+    unmatch_explore_depth: int = 30,
     # exact_partitions: ShapePartition,
     # offset: int = 0,
 ) -> Tuple[Configuration, ...]:
@@ -614,9 +627,10 @@ def construct_cut_point_abstraction(
 
             queue: List[Tuple[Configuration, int]] = [(cut_points[shape], 0)]
 
-            # explored_partition = ShapePartition()
-            # explored_shape_graph = ShapeGraph()
-            # explored_shape_graph.add_shape(shape)
+            explored_partition = ShapePartition()
+            explored_shape_graph = ShapeGraph()
+            explored_shape_graph.add_shape(shape)
+            explored_partition.add(cut_points[shape])
 
             while len(queue) != 0:
                 config, depth = queue.pop(0)
@@ -626,7 +640,9 @@ def construct_cut_point_abstraction(
                     continue
 
                 pe_to_fire = schedule(config)
-                no_successor = True
+
+                if len(pe_to_fire) == 0:
+                    unmatched_configs.append(config)
 
                 for pe_id in pe_to_fire:
                     results = config.copy().step_exhaust(pe_id)
@@ -635,9 +651,12 @@ def construct_cut_point_abstraction(
                     for result in results:
                         assert isinstance(result, NextConfiguration)
 
-                        no_successor = False
-
                         result_shape = ConfigurationShape.from_config(result.config)
+
+                        explored_partition.add(result.config)
+                        explored_shape_graph.add_shape(result_shape)
+                        explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
+
                         if result_shape in partitions:
                             other_cut_point = cut_points[result_shape]
                             match_result, _ = other_cut_point.match(result.config)
@@ -648,13 +667,7 @@ def construct_cut_point_abstraction(
                                 assert False, "same shape without match"
                         else:
                             # New shape
-                            # explored_partition.add(result.config)
-                            # explored_shape_graph.add_shape(result_shape)
-                            # explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
                             queue.append((result.config, depth + 1))
-
-                if no_successor:
-                    unmatched_configs.append(config)
 
         # for new_shape in explored_shape_graph.get_shapes():
         #     # Only add configs in a shape if it

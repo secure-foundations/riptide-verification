@@ -312,7 +312,19 @@ class StreamOperator(Operator):
         self.end: Optional[smt.SMTTerm] = None
 
     def match(self, other: Operator) -> MatchingResult:
-        raise NotImplementedError()
+        result = super().match(other)
+        assert isinstance(other, StreamOperator)
+
+        if (self.current is None) == (other.current is None) == (self.end is None) == (other.end is None):
+            if self.current is None:
+                return result
+            else:
+                return result \
+                    .merge(MatchingResult.match_smt_terms(self.current, other.current)) \
+                    .merge(MatchingResult.match_smt_terms(self.end, other.end))
+
+        else:
+            return result.merge(MatchingFailure(f"stream state not matched at operator {self.pe.id}"))
 
     def copy(self) -> StreamOperator:
         copied = super().copy()

@@ -70,7 +70,7 @@ class DataflowGraph:
             name = arg_obj["name"]
 
             if name.startswith("%"):
-                name = name[1]
+                name = name[1:]
 
             function_argument_names.add(name)
             function_arguments.append(FunctionArgument(name))

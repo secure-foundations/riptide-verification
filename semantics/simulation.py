@@ -307,7 +307,7 @@ class SimulationChecker:
                         for j, llvm_cut_point in enumerate(self.llvm_cut_points):
                             match_result = llvm_cut_point.match(result.config)
                             if isinstance(match_result, MatchingSuccess):
-                                assert match_result.check_condition(), f"invalid match at cut point {j}"
+                                assert match_result.check_condition(self.solver), f"invalid match at cut point {j}"
                                 logger.debug(f"[llvm] found a matching config to cut point {j}")
                                 self.matched_llvm_branches[j][i].append(LLVMBranch(result.config, match_result, new_trace, i, j))
                                 break
@@ -846,7 +846,7 @@ class SimulationChecker:
                     match_result, permission_equalities = target_dataflow_cut_point.match(dataflow_branch.config)
                     assert isinstance(match_result, MatchingSuccess), \
                            f"failed to match an expected dataflow branch from cut point {j} to {i}: {match_result.reason}"
-                    assert match_result.check_condition(), "unexpected matching failure"
+                    assert match_result.check_condition(self.solver), "unexpected matching failure"
                     dataflow_branch.match_result = match_result
                     dataflow_branch.permission_equalities = permission_equalities
 

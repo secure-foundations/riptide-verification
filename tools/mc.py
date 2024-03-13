@@ -538,6 +538,7 @@ def generalize_partition(partition: Tuple[Configuration, ...]) -> Configuration:
 def check_cut_point_abstraction_deadlock_freedom(
     cut_points: Tuple[Configuration, ...],
     schedule: OperatorSchedule,
+    solver: smt.SMTSolver,
 ):
     """
     Check if the cut point abstraction is valid and deadlock-free
@@ -583,7 +584,7 @@ def check_cut_point_abstraction_deadlock_freedom(
                     if result_shape in shape_to_cut_point:
                         other_cut_point = shape_to_cut_point[result_shape]
                         match_result, _ = other_cut_point.match(result.config)
-                        if isinstance(match_result, MatchingSuccess) and match_result.check_condition():
+                        if isinstance(match_result, MatchingSuccess) and match_result.check_condition(solver):
                             continue
 
                     queue.append(result.config)
@@ -595,9 +596,8 @@ def check_cut_point_abstraction_deadlock_freedom(
 def construct_cut_point_abstraction(
     configs: Iterable[Configuration],
     schedule: OperatorSchedule,
-    unmatch_explore_depth: int = 30,
-    # exact_partitions: ShapePartition,
-    # offset: int = 0,
+    solver: smt.SMTSolver,
+    unmatch_explore_depth: int = 15,
 ) -> Tuple[Configuration, ...]:
     """
     Check if the given set of cut points is a valid abstraction of the concrete semantics
@@ -627,10 +627,10 @@ def construct_cut_point_abstraction(
 
             queue: List[Tuple[Configuration, int]] = [(cut_points[shape], 0)]
 
-            explored_partition = ShapePartition()
-            explored_shape_graph = ShapeGraph()
-            explored_shape_graph.add_shape(shape)
-            explored_partition.add(cut_points[shape])
+            # explored_partition = ShapePartition()
+            # explored_shape_graph = ShapeGraph()
+            # explored_shape_graph.add_shape(shape)
+            # explored_partition.add(cut_points[shape])
 
             while len(queue) != 0:
                 config, depth = queue.pop(0)
@@ -653,15 +653,15 @@ def construct_cut_point_abstraction(
 
                         result_shape = ConfigurationShape.from_config(result.config)
 
-                        explored_partition.add(result.config)
-                        explored_shape_graph.add_shape(result_shape)
-                        explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
+                        # explored_partition.add(result.config)
+                        # explored_shape_graph.add_shape(result_shape)
+                        # explored_shape_graph.add_edge(ConfigurationShape.from_config(config), result_shape)
 
                         if result_shape in partitions:
                             other_cut_point = cut_points[result_shape]
                             match_result, _ = other_cut_point.match(result.config)
                             if isinstance(match_result, MatchingSuccess):
-                                if not match_result.check_condition():
+                                if not match_result.check_condition(solver):
                                     unmatched_configs.append(result.config)
                             else:
                                 assert False, "same shape without match"
@@ -758,7 +758,8 @@ def main():
             free_vars[function_arg.variable_name] = smt.FreshSymbol(smt.BVType(WORD_WIDTH))
             function_arg_free_vars.add(free_vars[function_arg.variable_name])
 
-    with smt.Solver("z3") as solver:
+    # with smt.Solver("cvc5", logic="QF_AUFBV") as solver:
+    with smt.Solver("z3", logic="QF_AUFBV") as solver:
         initial = Configuration.get_initial_configuration(dfg, free_vars, disable_permissions=True, solver=solver)
 
         # _, partitions = explore_states(initial, pure_priority_schedule, 1000)
@@ -766,12 +767,12 @@ def main():
         #     print(part[0])
 
         start_time = time.process_time()
-        cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule)
+        cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule, solver)
 
         print(f"found {len(cut_points)} cut points in {round(time.process_time() - start_time, 2)} s")
 
         start_time = time.process_time()
-        check_cut_point_abstraction_deadlock_freedom(cut_points, pure_priority_schedule)
+        check_cut_point_abstraction_deadlock_freedom(cut_points, pure_priority_schedule, solver)
         print(f"verified cut points in {round(time.process_time() - start_time, 2)} s")
 
         # for cut_point in cut_points:

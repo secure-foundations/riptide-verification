@@ -46,12 +46,11 @@ class MatchingSuccess:
             smt.And(self.condition, other.condition, *overlapping_constraint),
         )
 
-    def check_condition(self) -> bool:
+    def check_condition(self, solver: smt.SMTSolver) -> bool:
         """
         Check if the matching condition is valid
         """
-
-        with smt.Solver(name="z3") as solver:
+        with smt.push_solver(solver):
             solver.add_assertion(smt.Not(self.condition))
             return not solver.solve()
 

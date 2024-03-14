@@ -521,6 +521,16 @@ class StepException(StepResult):
     reason: str
 
 
+class InspectCache:
+    method_to_signature: Dict[Callable, Any] = {}
+
+    @staticmethod
+    def signature(method: Callable) -> Any:
+        if method not in InspectCache.method_to_signature:
+            InspectCache.method_to_signature[method] = inspect.signature(method, eval_str=True)
+        return InspectCache.method_to_signature[method]
+
+
 @dataclass
 class Configuration:
     graph: DataflowGraph
@@ -761,7 +771,7 @@ class Configuration:
 
     @staticmethod
     def get_transition_input_channels(pe_info: ProcessingElement, transition: TransitionFunction) -> Tuple[int, ...]:
-        signature = inspect.signature(transition, eval_str=True)
+        signature = InspectCache.signature(transition)
         channel_ids = []
 
         for i, (name, channel_param) in enumerate(signature.parameters.items()):
@@ -789,7 +799,7 @@ class Configuration:
 
     @staticmethod
     def get_transition_output_actions(transition: TransitionFunction) -> Tuple[Any, ...]:
-        return_annotation = inspect.signature(transition, eval_str=True).return_annotation
+        return_annotation = InspectCache.signature(transition).return_annotation
 
         if return_annotation is Branching:
             return return_annotation,

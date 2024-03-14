@@ -50,9 +50,7 @@ class MatchingSuccess:
         """
         Check if the matching condition is valid
         """
-        with smt.push_solver(solver):
-            solver.add_assertion(smt.Not(self.condition))
-            return not solver.solve()
+        return not smt.check_sat([smt.Not(self.condition)], solver)
 
 
 @dataclass

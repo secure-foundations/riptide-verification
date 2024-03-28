@@ -759,7 +759,7 @@ def main():
             function_arg_free_vars.add(free_vars[function_arg.variable_name])
 
     # with smt.Solver("cvc5", logic="QF_AUFBV") as solver:
-    with smt.Solver("z3", logic="QF_AUFBV") as solver:
+    with smt.Solver("z3", logic="QF_AUFBV", random_seed=0) as solver:
         initial = Configuration.get_initial_configuration(dfg, free_vars, disable_permissions=True, solver=solver)
 
         # _, partitions = explore_states(initial, pure_priority_schedule, 1000)
@@ -770,7 +770,6 @@ def main():
         cut_points = construct_cut_point_abstraction([initial], pure_priority_schedule, solver)
 
         print(f"found {len(cut_points)} cut points in {round(time.process_time() - start_time, 2)} s")
-        print(f"z3 took {round(smt.time_total, 2)} s")
 
         start_time = time.process_time()
         check_cut_point_abstraction_deadlock_freedom(cut_points, pure_priority_schedule, solver)

@@ -67,10 +67,6 @@ def FreshSort() -> SMTSort:
     return Type(name)
 
 
-import time
-time_total = 0.0
-
-
 def check_sat(terms: Iterable[SMTTerm], solver: Optional[Solver] = None) -> bool:
     """
     Check satisfiability of the conjunction of terms
@@ -79,14 +75,10 @@ def check_sat(terms: Iterable[SMTTerm], solver: Optional[Solver] = None) -> bool
         with Solver(name="z3") as solver:
             return check_sat(terms, solver)
     else:
-        global time_total
-        start = time.process_time()
         with push_solver(solver):
             for term in terms:
                 solver.add_assertion(term)
-            result = solver.solve()
-            time_total += time.process_time() - start
-            return result
+            return solver.solve()
 
 
 def check_implication(a: Iterable[SMTTerm], b: Iterable[SMTTerm], solver: Optional[Solver] = None) -> bool:

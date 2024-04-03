@@ -100,8 +100,12 @@ class DataflowGraph:
                     output_channels[input_pe_id][input_pe_port].append(channel)
 
                 elif input["type"] == "xdata":
-                    assert input["name"] in function_argument_names
-                    function_arg = FunctionArgument(input["name"])
+                    name = input["name"]
+                    if name.startswith("%"):
+                        name = name[1:]
+
+                    assert name in function_argument_names
+                    function_arg = FunctionArgument(name)
                     channel = Channel(channel_id, None, None, i, port, function_arg, input["hold"], default_channel_bound)
 
                 elif input["type"] == "const":

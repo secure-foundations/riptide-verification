@@ -484,7 +484,7 @@ class ZextInstruction(Instruction):
         self.value = self.value.resolve_uses(function)
 
     def get_full_string(self) -> str:
-        return f"{self.name} = zext {self.from_type} {self.left} to {self.to_type}"
+        return f"{self.name} = zext {self.from_type} {self.value} to {self.to_type}"
 
     def get_type(self) -> Type:
         return self.to_type
@@ -507,7 +507,7 @@ class SextInstruction(Instruction):
         self.value = self.value.resolve_uses(function)
 
     def get_full_string(self) -> str:
-        return f"{self.name} = sext {self.from_type} {self.left} to {self.to_type}"
+        return f"{self.name} = sext {self.from_type} {self.value} to {self.to_type}"
 
     def get_type(self) -> Type:
         return self.to_type

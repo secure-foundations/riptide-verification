@@ -505,13 +505,26 @@ class Configuration:
                 assert False, f"function {instr.function_name} not implemented"
 
         elif isinstance(instr, PhiInstruction):
-            assert self.previous_block in instr.branches, \
-                   f"block label {self.current_block} not in the list of phi branches"
+            prev_block = self.previous_block
+
+            if prev_block not in instr.branches:
+                if prev_block == "entry":
+                    # TODO: a hacky fix for automatically assigned entry block label
+                    # Find the a branch with undefined block label
+                    for branch in instr.branches:
+                        if branch not in self.function.blocks:
+                            prev_block = branch
+                            break
+                    else:
+                        assert False, f"no undefined branch name in the phi instruction"
+                else:
+                    assert False, f"block label {prev_block} not in the list of phi branches"
+
             # All phi instructions should be run "in parallel"
             # e.g.
             # a = phi c
             # b = phi a // this should take the value of a at the loop header, instead of the new value
-            self.uncommitted_phi_assignments.append((instr.name, self.eval_value(instr.branches[self.previous_block].value)))
+            self.uncommitted_phi_assignments.append((instr.name, self.eval_value(instr.branches[prev_block].value)))
             # self.set_variable(instr.name, self.eval_value(instr.branches[self.previous_block].value))
             self.current_instr_counter += 1
             return NextConfiguration(self),

@@ -35,6 +35,9 @@ class ASTTransformer(Transformer[ASTNode]):
         label = args[0].value[:-1]
         return BasicBlock(label, tuple(args[1:]))
 
+    def entry_basic_block(self, args: List[Any]) -> BasicBlock:
+        return BasicBlock("entry", tuple(args))
+
     def instruction_with_metadata(self, args: List[Any]) -> Instruction:
         return args[0] # ignoring metadata
 
@@ -225,7 +228,7 @@ class Parser:
         INTEGER: /-?(0|[1-9][0-9]*)/
         INTEGER_TYPE: /i[1-9][0-9]*/
         VARIABLE: /(%|@)((0|[1-9][0-9]*)|([A-Za-z._][A-Za-z0-9-_'.]*))/
-        BLOCK_LABEL: /[A-Za-z][A-Za-z0-9-_'.]*:/
+        BLOCK_LABEL: /[A-Za-z0-9.][A-Za-z0-9-_'.]*:/
         METADATA_LABEL: /!((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/
         ATTRIBUTE_GROUP_NAME: /\#((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/
         IDENTIFIER.0: /[A-Za-z][A-Za-z0-9-_'.]*/
@@ -252,8 +255,9 @@ class Parser:
         parameters: [parameter ("," parameter)*]
         parameter: type parameter_attributes VARIABLE
 
-        basic_blocks: basic_block*
+        basic_blocks: entry_basic_block basic_block*
         basic_block: BLOCK_LABEL instruction_with_metadata*
+        entry_basic_block: ["entry:"] instruction_with_metadata*
 
         instruction_with_metadata: instruction ("," METADATA_LABEL+)*
 

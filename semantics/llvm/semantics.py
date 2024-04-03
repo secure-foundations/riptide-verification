@@ -480,6 +480,15 @@ class Configuration:
                 self.current_instr_counter += 1
                 return NextConfiguration(self),
 
+            elif instr.function_name == "@llvm.fshl.i32":
+                assert len(instr.arguments) == 3
+                a = self.eval_value(instr.arguments[0][1])
+                b = self.eval_value(instr.arguments[1][1])
+                c = self.eval_value(instr.arguments[2][1])
+                self.set_variable(instr.name, smt.BVExtract(smt.BVLShl(smt.BVConcat(a, b), smt.BVZExt(c, WORD_WIDTH)), WORD_WIDTH, 2 * WORD_WIDTH - 1))
+                self.current_instr_counter += 1
+                return NextConfiguration(self),
+
             else:
                 assert False, f"function {instr.function_name} not implemented"
 

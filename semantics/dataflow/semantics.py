@@ -133,6 +133,12 @@ class AshrOperator(Operator):
         return smt.BVAShr(a, b)
 
 
+@Operator.implement("ARITH_CFG_OP_FSHL")
+class FshlOperator(Operator):
+    def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1), c: ChannelId(2)) -> ChannelId(0):
+        return smt.BVExtract(smt.BVLShl(smt.BVConcat(a, b), smt.BVZExt(c, WORD_WIDTH)), WORD_WIDTH, 2 * WORD_WIDTH - 1)
+
+
 @Operator.implement("ARITH_CFG_OP_GEP")
 class GEPOperator(Operator):
     def start(self, config: Configuration, a: ChannelId(0), b: ChannelId(1)) -> ChannelId(0):
@@ -677,7 +683,7 @@ class Configuration:
         operator_states: List[Operator] = []
         for i, vertex in enumerate(graph.vertices):
             assert vertex.operator in Operator.OPERATOR_IMPL_MAP, \
-                   f"unable to find an implementation for operator {vertex.operator}"
+                   f"unable to find an implementation for operator `{vertex.operator}`"
             impl = Operator.OPERATOR_IMPL_MAP[vertex.operator]
             perm_var = config.get_fresh_permission_var(f"{permission_prefix}{PERMISSION_PREFIX_INTERNAL}{i}-")
             operator_states.append(impl(vertex, perm_var))

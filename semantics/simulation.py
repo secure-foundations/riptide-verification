@@ -810,7 +810,7 @@ class SimulationChecker:
 
         if not smt.check_implication(source_correspondence_smt, obligations, self.solver):
             blame = smt.find_implication_blame(source_correspondence_smt, obligations, self.solver)
-            logger.debug("knows: {source_correspondence}")
+            logger.debug(f"knows: {source_correspondence}")
             logger.debug("blame:\n" + "\n".join(map(lambda t: "  " + t.serialize(), blame)))
             assert False, f"a branch from {llvm_branch.from_cut_point} to {llvm_branch.to_cut_point or '⊥'} fails the bisimulation obligations"
 

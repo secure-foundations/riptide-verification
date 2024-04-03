@@ -632,7 +632,7 @@ class StoreInstruction(Instruction):
 @dataclass
 class CallInstruction(Instruction):
     name: Optional[str] # name of the variable it defines
-    type: FunctionType
+    type: Type
     function_name: str
     arguments: Tuple[Tuple[Type, Value], ...]
 
@@ -643,7 +643,11 @@ class CallInstruction(Instruction):
         self.arguments = tuple((arg_type, value.resolve_uses(function)) for arg_type, value in self.arguments)
 
     def get_type(self) -> Type:
-        return self.type.return_type
+        # TODO: need to parse differently
+        if isinstance(self.type, FunctionType):
+            return self.type.return_type
+        else:
+            return self.type
 
     def get_full_string(self) -> str:
         prefix = "" if self.name is None else f"{self.name} = "

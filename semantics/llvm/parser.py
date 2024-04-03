@@ -16,7 +16,7 @@ class ASTTransformer(Transformer[ASTNode]):
     def module(self, args: List[Optional[Function]]) -> Module:
         return Module(OrderedDict((arg.name, arg) for arg in args if arg is not None))
 
-    def function(self, args: List[Any]) -> Function:
+    def function_definition(self, args: List[Any]) -> Function:
         _, return_typ, name_token, parameters, _, blocks = args
         return Function(
             name_token.value,
@@ -24,6 +24,9 @@ class ASTTransformer(Transformer[ASTNode]):
             OrderedDict((parameter.name, parameter) for parameter in parameters),
             OrderedDict((block.name, block) for block in blocks),
         )
+
+    def function_declaration(self, args: List[Any]) -> None:
+        return None
 
     def basic_blocks(self, args: List[BasicBlock]) -> Tuple[BasicBlock, ...]:
         return tuple(args)
@@ -179,7 +182,7 @@ class ASTTransformer(Transformer[ASTNode]):
     def array_type(self, args: List[Type]) -> ArrayType:
         return ArrayType(args[1], int(args[0].value))
 
-    def function_type(self, args: List[FunctionType]) -> FunctionType:
+    def call_return_type(self, args: List[FunctionType]) -> FunctionType:
         return args[0]
 
     def function_type_with_eclipsis(self, args: List[Type]) -> FunctionType:
@@ -227,21 +230,24 @@ class Parser:
         ATTRIBUTE_GROUP_NAME: /\#((0|[1-9][0-9]*)|([A-Za-z][A-Za-z0-9-_'.]*))/
         IDENTIFIER.0: /[A-Za-z][A-Za-z0-9-_'.]*/
 
-        module: (metadata|function)*
+        module: (metadata|function_definition|function_declaration)*
 
         type: "void" -> void_type
             | integer_type
             | pointer_type
             | array_type
 
-        function_type: type "(" [type ("," type)*] "," "..." ")" -> function_type_with_eclipsis
-                     | type "(" [type ("," type)*] ")" -> function_type_without_eclipsis
+        call_return_type: type "(" [type ("," type)*] "," "..." ")" -> function_type_with_eclipsis
+                        | type "(" [type ("," type)*] ")" -> function_type_without_eclipsis
+                        | type
 
         integer_type: INTEGER_TYPE
         pointer_type: type "*"
         array_type: "[" INTEGER "x" type "]"
 
-        function: "define" function_attributes type VARIABLE "(" parameters ")" function_attributes "{" basic_blocks "}"
+        function_definition: "define" function_attributes type VARIABLE "(" parameters ")" function_attributes "{" basic_blocks "}"
+
+        function_declaration: "declare" function_attributes type VARIABLE "(" [type ("," type)*] ")" function_attributes
 
         parameters: [parameter ("," parameter)*]
         parameter: type parameter_attributes VARIABLE
@@ -299,8 +305,8 @@ class Parser:
 
         store_instruction: "store" type value "," pointer_type value ["," "align" INTEGER]
 
-        call_instruction: variable "=" "call" function_type variable "(" call_arguments ")" -> call_instruction_with_return
-                        | "call" function_type variable "(" call_arguments ")" -> call_instruction_without_return
+        call_instruction: variable "=" ["tail"] "call" call_return_type variable "(" call_arguments ")" -> call_instruction_with_return
+                        | ["tail"] "call" call_return_type variable "(" call_arguments ")" -> call_instruction_without_return
         call_arguments: [call_argument ("," call_argument)*]
         call_argument: type value
 
@@ -352,6 +358,7 @@ class Parser:
 
         attribute_key_value: IDENTIFIER
                            | STRING
+                           | parameter_attribute
                            | IDENTIFIER "=" attribute_value
                            | STRING "=" attribute_value
 

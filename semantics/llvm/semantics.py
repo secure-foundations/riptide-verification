@@ -56,6 +56,8 @@ class Configuration:
 
     solver: Optional[smt.Solver] = None
 
+    uncommitted_phi_assignments: List[Tuple[str, smt.SMTTerm]] = field(default_factory=list)
+
     def __str__(self) -> str:
         lines = []
 
@@ -101,6 +103,7 @@ class Configuration:
 
         assert self.module == other.module and self.function == other.function
         assert len(self.memory_updates) == 0
+        assert len(self.uncommitted_phi_assignments) == 0
 
         if self.current_block != other.current_block:
             return MatchingFailure("unmatched current block")
@@ -110,6 +113,8 @@ class Configuration:
 
         if self.current_instr_counter != other.current_instr_counter:
             return MatchingFailure("unmatched instruction counter")
+
+        assert len(other.uncommitted_phi_assignments) == 0
 
         result = MatchingSuccess()
 
@@ -177,6 +182,7 @@ class Configuration:
             list(self.memory_updates),
             self.memory,
             self.solver,
+            list(self.uncommitted_phi_assignments),
         )
 
     def get_current_instruction(self) -> Instruction:
@@ -281,6 +287,12 @@ class Configuration:
             LshrInstruction: smt.BVLShr,
             AshrInstruction: smt.BVAShr,
         }
+
+        # First non-phi instruction, commit all phi assignments
+        if not isinstance(instr, PhiInstruction) and len(self.uncommitted_phi_assignments) != 0:
+            for var, value in self.uncommitted_phi_assignments:
+                self.set_variable(var, value)
+            self.uncommitted_phi_assignments = []
 
         if instr.__class__ in binary_op_semantics:
             func = binary_op_semantics[instr.__class__]
@@ -495,7 +507,12 @@ class Configuration:
         elif isinstance(instr, PhiInstruction):
             assert self.previous_block in instr.branches, \
                    f"block label {self.current_block} not in the list of phi branches"
-            self.set_variable(instr.name, self.eval_value(instr.branches[self.previous_block].value))
+            # All phi instructions should be run "in parallel"
+            # e.g.
+            # a = phi c
+            # b = phi a // this should take the value of a at the loop header, instead of the new value
+            self.uncommitted_phi_assignments.append((instr.name, self.eval_value(instr.branches[self.previous_block].value)))
+            # self.set_variable(instr.name, self.eval_value(instr.branches[self.previous_block].value))
             self.current_instr_counter += 1
             return NextConfiguration(self),
 

@@ -71,8 +71,18 @@ OPERATOR_INFO = {
         "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },
+    "ARITH_CFG_OP_LSHR": {
+        "dot_label": "l>>",
+        "dot_attr": _DOT_CIRCLE_ATTR,
+        **_BINARY_ARITH_PORT_POSITIONS,
+    },
     "ARITH_CFG_OP_ASHR": {
         "dot_label": ">>",
+        "dot_attr": _DOT_CIRCLE_ATTR,
+        **_BINARY_ARITH_PORT_POSITIONS,
+    },
+    "ARITH_CFG_OP_FSHL": {
+        "dot_label": "f<<",
         "dot_attr": _DOT_CIRCLE_ATTR,
         **_BINARY_ARITH_PORT_POSITIONS,
     },

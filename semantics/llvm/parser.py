@@ -339,6 +339,7 @@ class Parser:
         function_attribute: ATTRIBUTE_GROUP_NAME
                           | "dso_local"
                           | "local_unnamed_addr"
+                          | "arm_aapcscc"
 
         parameter_attributes: parameter_attribute*
 

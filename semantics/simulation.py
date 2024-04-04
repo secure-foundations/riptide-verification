@@ -484,7 +484,7 @@ class SimulationChecker:
                 # Check for nested merges
                 scheduled_pe_ids = self.find_nested_merges(pe.id)
 
-            # print("executing", scheduled_pe_ids)
+            # logger.debug(f"executing {scheduled_pe_ids}")
             results = config.step_until_branch(scheduled_pe_ids, base_pointer_mapping=self.base_pointer_mapping)
             if len(results) == 1:
                 config = results[0].config
@@ -844,6 +844,7 @@ class SimulationChecker:
                 for dataflow_branch in self.matched_dataflow_branches[i][j]:
                     logger.debug(f"[dataflow] checking a matched branch from cut point {j} to {i}")
                     match_result, permission_equalities = target_dataflow_cut_point.match(dataflow_branch.config)
+                    # print(f"llvm trace from {dataflow_branch.llvm_branch.from_cut_point} to {dataflow_branch.llvm_branch.to_cut_point}: {dataflow_branch.llvm_branch.trace}")
                     assert isinstance(match_result, MatchingSuccess), \
                            f"failed to match an expected dataflow branch from cut point {j} to {i}: {match_result.reason}"
                     assert match_result.check_condition(self.solver), "unexpected matching failure"

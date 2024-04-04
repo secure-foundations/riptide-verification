@@ -35,9 +35,6 @@ class ASTTransformer(Transformer[ASTNode]):
         label = args[0].value[:-1]
         return BasicBlock(label, tuple(args[1:]))
 
-    def entry_basic_block(self, args: List[Any]) -> BasicBlock:
-        return BasicBlock("entry", tuple(args))
-
     def instruction_with_metadata(self, args: List[Any]) -> Instruction:
         return args[0] # ignoring metadata
 
@@ -255,9 +252,8 @@ class Parser:
         parameters: [parameter ("," parameter)*]
         parameter: type parameter_attributes VARIABLE
 
-        basic_blocks: entry_basic_block basic_block*
+        basic_blocks: basic_block*
         basic_block: BLOCK_LABEL instruction_with_metadata*
-        entry_basic_block: ["entry:"] instruction_with_metadata*
 
         instruction_with_metadata: instruction ("," METADATA_LABEL+)*
 

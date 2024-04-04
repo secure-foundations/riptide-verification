@@ -417,6 +417,167 @@ class FiniteFractionalPA(PermissionAlgebra):
         assert False, f"unsupported formula {formula}"
 
 
+@dataclass
+class FiniteFractionalPAInteger(PermissionAlgebra):
+    """
+    Same as FiniteFractionalPA but encoded in integers
+    """
+
+    heap_objects: Tuple[str, ...]
+    read_count: int # how many reads can a write be split into
+
+    @dataclass
+    class Element(PermissionAlgebraElement):
+        smt_terms: Mapping[str, smt.SMTTerm]
+
+    def get_value_from_smt_model(self, element: FiniteFractionalPAInteger.Element, model: smt.SMTModel) -> Term:
+        # get a concrete interpretation from an SMT model
+        # assuming self.smt_terms only contains variables
+
+        subterms: List[Term] = []
+
+        for obj in self.heap_objects:
+            value = model[element.smt_terms[obj]].constant_value()
+            assert value >= 0 and value <= self.read_count
+
+            if value == self.read_count:
+                subterms.append(Write(obj))
+            else:
+                for i in range(value):
+                    subterms.append(Read(obj, i))
+
+        return DisjointUnion.of(*subterms)
+
+    def get_zero(self) -> FiniteFractionalPAInteger.Element:
+        return FiniteFractionalPAInteger.Element({
+            obj: smt.Int(0)
+            for obj in self.heap_objects
+        })
+
+    def get_read_atom(self, target_obj: str, read_index: int) -> FiniteFractionalPAInteger.Element:
+        assert target_obj in self.heap_objects, f"invalid heap object {target_obj} (only given {self.heap_objects})"
+        return FiniteFractionalPAInteger.Element({
+            obj: smt.Int(1) if obj == target_obj else smt.Int(0)
+            for obj in self.heap_objects
+        })
+
+    def get_write_atom(self, target_obj: str) -> FiniteFractionalPAInteger.Element:
+        assert target_obj in self.heap_objects, f"invalid heap object {target_obj} (only given {self.heap_objects})"
+        return FiniteFractionalPAInteger.Element({
+            obj: smt.Int(self.read_count) if obj == target_obj else smt.Int(0)
+            for obj in self.heap_objects
+        })
+
+    def get_fresh_variable(self) -> Tuple[FiniteFractionalPAInteger.Element, smt.SMTTerm]:
+        smt_vars = {
+            obj: smt.FreshSymbol(smt.INT)
+            for obj in self.heap_objects
+        }
+
+        defined = smt.And(
+            smt.And(
+                smt.GE(smt_vars[obj], smt.Int(0)),
+                smt.LE(smt_vars[obj], smt.Int(self.read_count)),
+            )
+            for obj in self.heap_objects
+        )
+
+        return FiniteFractionalPAInteger.Element(smt_vars), defined
+
+    def interpret_term(self, assignment: Mapping[Variable, FiniteFractionalPAInteger.Element], term: Term) -> Tuple[FiniteFractionalPAInteger.Element, smt.SMTTerm]:
+        """
+        Interprete a term in the PCM, returning (permission element, condition to be well-defined)
+        """
+
+        if isinstance(term, Empty):
+            return self.get_zero(), smt.TRUE()
+
+        if isinstance(term, Read):
+            return self.get_read_atom(term.heap_object, term.index), smt.TRUE()
+
+        if isinstance(term, Write):
+            return self.get_write_atom(term.heap_object), smt.TRUE()
+
+        if isinstance(term, Variable):
+            assert term in assignment, f"unable ot find variable {term} in the given assignment"
+            return assignment[term], smt.TRUE()
+
+        if isinstance(term, DisjointUnion):
+            subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in term.terms)
+            defined = smt.And(
+                smt.And(cond for _, cond in subterm_interps),
+                smt.And(
+                    smt.LE(
+                        smt.Plus(subterm_interp.smt_terms[obj] for subterm_interp, _ in subterm_interps),
+                        smt.Int(self.read_count),
+                    )
+                    for obj in self.heap_objects
+                ),
+            )
+
+            interp: Dict[str, Tuple[smt.SMTTerm, smt.SMTTerm]] = {
+                obj: smt.Plus(subterm_interp.smt_terms[obj] for subterm_interp, _ in subterm_interps)
+                for obj in self.heap_objects
+            }
+
+            return FiniteFractionalPAInteger.Element(interp), defined
+
+        assert False, f"unsupported term {term}"
+
+    def interpret_formula(self, assignment: Mapping[Variable, FiniteFractionalPAInteger.Element], formula: Formula) -> smt.SMTTerm:
+        """
+        Interpret a formula in the PCM, returning (truth, condition to be well-defined)
+        """
+
+        if isinstance(formula, Equality):
+            left_interp, left_defined = self.interpret_term(assignment, formula.left)
+            right_interp, right_defined = self.interpret_term(assignment, formula.right)
+            interp = smt.And(
+                smt.Equals(left_interp.smt_terms[obj], right_interp.smt_terms[obj])
+                for obj in self.heap_objects
+            )
+            defined = smt.And(left_defined, right_defined)
+            return smt.And(interp, defined)
+
+        if isinstance(formula, HasRead):
+            term_interp, term_defined = self.interpret_term(assignment, formula.term)
+            interp = smt.GT(term_interp.smt_terms[formula.heap_object], smt.Int(0))
+            return smt.And(interp, term_defined)
+
+        if isinstance(formula, Inclusion):
+            left_interp, left_defined = self.interpret_term(assignment, formula.left)
+            right_interp, right_defined = self.interpret_term(assignment, formula.right)
+            interp = smt.And(
+                smt.LE(
+                    left_interp.smt_terms[obj],
+                    right_interp.smt_terms[obj],
+                )
+                for obj in self.heap_objects
+            )
+            defined = smt.And(left_defined, right_defined)
+            return smt.And(interp, defined)
+
+        if isinstance(formula, Disjoint):
+            subterm_interps = tuple(self.interpret_term(assignment, subterm) for subterm in formula.terms)
+            interp = smt.And(
+                smt.LE(
+                    smt.Plus(subterm_interp.smt_terms[obj] for subterm_interp, _ in subterm_interps),
+                    smt.Int(self.read_count),
+                )
+                for obj in self.heap_objects
+            )
+            defined = smt.And(cond for _, cond in subterm_interps)
+            return smt.And(interp, defined)
+
+        if isinstance(formula, Conjunction):
+            return smt.And(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
+
+        if isinstance(formula, Disjunction):
+            return smt.Or(self.interpret_formula(assignment, subformula) for subformula in formula.formulas)
+
+        assert False, f"unsupported formula {formula}"
+
+
 class SolverResult: ...
 
 

@@ -664,8 +664,13 @@ class PhiInstruction(Instruction):
         return self.name
 
     def resolve_uses(self, function: Function) -> None:
+        new_branches = OrderedDict()
+
         for branch in self.branches.values():
             branch.resolve_uses(function)
+            new_branches[branch.label] = branch
+
+        self.branches = new_branches
 
     def get_full_string(self) -> str:
         branches_string = ", ".join(f"({branch.value}, {branch.label})" for branch in self.branches.values())
@@ -685,6 +690,10 @@ class PhiBranch(ASTNode):
 
     def resolve_uses(self, function: Function) -> None:
         self.value = self.value.resolve_uses(function)
+
+        # TODO: this is a workaround for implicitly-labeled entry block
+        if self.label not in function.blocks:
+            self.label = "entry"
 
 
 @dataclass

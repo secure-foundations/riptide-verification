@@ -988,7 +988,7 @@ class Configuration:
                         self.permission_constraints.append(permission.HasRead(base_pointer, permission.DisjointUnion(input_permissions)))
 
                 else:
-                    self.permission_constraints.append(permission.Inclusion(
+                    self.permission_constraints.append(permission.Equality(
                         permission.DisjointUnion.of(*(
                             permission.Write(base_pointer)
                             for base_pointer in unique_base_pointers
@@ -1015,7 +1015,7 @@ class Configuration:
             configuration_false.path_conditions.append(smt.Not(output_value.condition).simplify())
 
             if not self.disable_permissions:
-                permission_constraint = permission.Inclusion(
+                permission_constraint = permission.Equality(
                     permission.DisjointUnion.of(*output_permissions),
                     permission.DisjointUnion.of(*input_permissions),
                 )
@@ -1048,7 +1048,7 @@ class Configuration:
             # Add permission constraint:
             #   output_permission + new_internal_permission <= input_permission + old_internal_permission
             if not self.disable_permissions:
-                permission_constraint = permission.Inclusion(
+                permission_constraint = permission.Equality(
                     permission.DisjointUnion.of(*output_permissions),
                     permission.DisjointUnion.of(*input_permissions),
                 )

@@ -1225,7 +1225,7 @@ proof fn theorem_strong_normalization(trace1: AugmentedTrace, trace2_configs: Se
 
         // assert(!multiset_contains(convergent_trace_rest.operators, seq![op]));
         lemma_multiset_not_contains_singleton(convergent_trace_rest.operators, op);
-        // assume(forall |i: int| 0 <= i < convergent_trace_rest.len() ==> convergent_trace_rest.operators[i] != op);
+        // assert(forall |i: int| 0 <= i < convergent_trace_rest.len() ==> convergent_trace_rest.operators[i] != op);
 
         assert(trace2_configs[split] == trace2_configs.take(split + 1)[split]);
         // assert(convergent_trace.configs[split].config == trace2_configs[split]);

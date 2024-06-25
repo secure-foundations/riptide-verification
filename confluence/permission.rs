@@ -1,5 +1,5 @@
 use vstd::prelude::*;
-use vstd::multiset::Multiset;
+use crate::multiset::*;
 use crate::semantics::*;
 
 verus! {
@@ -984,113 +984,6 @@ proof fn lemma_consistent_trace_commutes(trace: AugmentedTrace)
 }
 
 /**
- * Defines s1 >= s2 as a multiset
- */
-#[verifier(opaque)]
-spec fn multiset_contains(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>) -> bool
-{
-    s2.to_multiset().subset_of(s1.to_multiset())
-}
-
-proof fn lemma_multiset_contains_length(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>)
-    requires
-        multiset_contains(s1, s2),
-
-    ensures
-        s1.len() >= s2.len(),
-{
-    reveal(multiset_contains);
-    s1.to_multiset_ensures();
-    s2.to_multiset_ensures();
-    let _ = s1.to_multiset().sub(s2.to_multiset()).len();
-}
-
-proof fn lemma_multiset_singleton_seq(op: OperatorIndex)
-    ensures
-        seq![op].to_multiset() =~= Multiset::singleton(op),
-{
-    assert(seq![op][0] == op);
-    seq![op].to_multiset_ensures();
-}
-
-proof fn lemma_multiset_add_commutes_with_concat(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>)
-    ensures
-        (s1 + s2).to_multiset() == s1.to_multiset().add(s2.to_multiset()),
-{
-    vstd::seq_lib::lemma_multiset_commutative(s1, s2);
-}
-
-proof fn lemma_multiset_remove_insert(s: Seq<OperatorIndex>, i: int)
-    requires
-        0 <= i < s.len(),
-
-    ensures
-        s.remove(i).to_multiset().insert(s[i]) == s.to_multiset(),
-{
-    s.to_multiset_ensures();
-
-    let _ = s.to_multiset().count(s[i]);
-
-    let s1 = s.subrange(0, i);
-    let s2 = seq![s[i]];
-    let s3 = s.skip(i + 1);
-
-    assert(s =~= s1 + s2 + s3);
-
-    vstd::seq_lib::lemma_multiset_commutative(s1 + s2, s3);
-    vstd::seq_lib::lemma_multiset_commutative(s1 + s3, s2);
-    vstd::seq_lib::lemma_multiset_commutative(s1, s2);
-    vstd::seq_lib::lemma_multiset_commutative(s1, s3);
-
-    assert(s.remove(i).to_multiset() == s1.to_multiset().add(s3.to_multiset()));
-
-    (s1 + s3).to_multiset_ensures();
-
-    assert(s.remove(i).to_multiset().insert(s[i]) == s.to_multiset());
-}
-
-proof fn lemma_multiset_contains_remove(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>, i: int, j: int)
-    requires
-        0 <= i < s1.len(),
-        0 <= j < s2.len(),
-        s1[i] == s2[j],
-
-    ensures
-        multiset_contains(s1, s2) <==> multiset_contains(s1.remove(i), s2.remove(j)),
-{
-    reveal(multiset_contains);
-    lemma_multiset_remove_insert(s1, i);
-    lemma_multiset_remove_insert(s2, j);
-    assert(s1.remove(i).to_multiset() == s1.to_multiset().remove(s1[i]));
-    assert(s2.remove(j).to_multiset() == s2.to_multiset().remove(s2[j]));
-}
-
-proof fn lemma_multiset_contains_transitive(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>, s3: Seq<OperatorIndex>)
-    requires
-        multiset_contains(s1, s2),
-        multiset_contains(s2, s3),
-
-    ensures
-        multiset_contains(s1, s3),
-{
-    reveal(multiset_contains);
-}
-
-proof fn lemma_multiset_contains_transitive_elem(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>, op: OperatorIndex)
-    requires
-        multiset_contains(s1, s2),
-        s2.contains(op),
-
-    ensures
-        s1.contains(op),
-{
-    reveal(multiset_contains);
-    s1.to_multiset_ensures();
-    s2.to_multiset_ensures();
-    let _ = s1.to_multiset().count(op);
-}
-
-/**
  * Constructs the convergence trace in theorem_bounded_confluence
  */
 #[verifier(opaque)]
@@ -1163,7 +1056,7 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
             (forall |i: int| 0 <= i < trace2_operators.len() ==>
                 convergent_trace.operators[i] == #[trigger] trace2_operators[i]) &&
 
-            // Convergence trace use the exactly same operators as the consistent trace
+            // Convergence trace use exactly the same operators as the consistent trace
             trace1.operators.to_multiset() == convergent_trace.operators.to_multiset() &&
 
             // convergent_trace starts and ends the same as trace1 (with the same augmentation)
@@ -1209,8 +1102,6 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
         }
 
         theorem_bounded_confluence(commuted_trace_rest, trace2_configs.drop_first(), trace2_operators.drop_first());
-
-        // assert(trace1.operators.to_multiset() =~= commuted_trace_rest.operators.to_multiset().insert(trace2_first_op));
 
         assert(seq![trace2_configs[0]] + trace2_configs.drop_first() =~= trace2_configs);
         assert(seq![trace2_operators[0]] + trace2_operators.drop_first() =~= trace2_operators);
@@ -1276,72 +1167,6 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
     reveal(bounded_confluence_trace);
 }
 
-spec fn multiset_split(a: Seq<OperatorIndex>, b: Seq<OperatorIndex>) -> int
-    decreases b.len()
-{
-    if b.len() == 0 || !a.to_multiset().contains(b[0]) {
-        0
-    } else {
-        let i = a.index_of(b[0]);
-        multiset_split(a.remove(i), b.remove(0)) + 1
-    }
-}
-
-/**
- * Lemma: If a does not contain b, then there exists a split point within b such that
- * a contains b[:split] and does not contain b[split:]
- *
- * Such split is witnessed by multiset_split(a, b)
- */
-proof fn lemma_multiset_split(a: Seq<OperatorIndex>, b: Seq<OperatorIndex>)
-    requires !multiset_contains(a, b)
-    ensures ({
-        let split = multiset_split(a, b);
-        0 <= split < b.len() &&
-        split <= a.len() &&
-        multiset_contains(a, b.take(split)) &&
-        !multiset_contains(a, b.take(split + 1))
-    })
-    decreases b.len()
-{
-    reveal(multiset_contains);
-
-    if b.len() > 0 && a.to_multiset().contains(b[0]) {
-        a.to_multiset_ensures();
-        assert(a.contains(b[0]));
-
-        let i = a.index_of(b[0]);
-        lemma_multiset_contains_remove(a, b, i, 0);
-
-        let split = multiset_split(a.remove(i), b.remove(0)) + 1;
-        lemma_multiset_split(a.remove(i), b.remove(0));
-
-        assert(b.remove(0).take(split - 1) =~= b.take(split).remove(0));
-        assert(b.remove(0).take(split) =~= b.take(split + 1).remove(0));
-
-        // assert(multiset_contains(a.remove(i), b.take(split).remove(0)));
-        // assert(!multiset_contains(a.remove(i), b.take(split + 1).remove(0)));
-
-        lemma_multiset_contains_remove(a, b.take(split), i, 0);
-        lemma_multiset_contains_remove(a, b.take(split + 1), i, 0);
-    } else {
-        a.to_multiset_ensures();
-        b.to_multiset_ensures();
-        b.take(0).to_multiset_ensures();
-        lemma_multiset_singleton_seq(b[0]);
-        assert(seq![b[0]] =~= b.take(1));
-
-        if b.len() == 0 {
-            assert(multiset_contains(a, b));
-            assert(false);
-        }
-
-        // assert(!a.to_multiset().contains(b[0]));
-        // assert(!Multiset::singleton(b[0]).subset_of(a.to_multiset()));
-        // assert(seq![b[0]].to_multiset() == Multiset::singleton(b[0]));
-    }
-}
-
 /**
  * Theorem: If trace1 and trace2 have the same initial configuration,
  * and trace1's last configuration is final.
@@ -1369,15 +1194,13 @@ proof fn theorem_strong_normalization(trace1: AugmentedTrace, trace2_configs: Se
         multiset_contains(trace1.operators, trace2_operators),
 {
     if !multiset_contains(trace1.operators, trace2_operators) {
-        reveal(multiset_contains);
-
         // Exists i: int. trace2_operators[:i] <= trace1.operators /\ trace2_operators[:i+1] </= trace1.operators
         let split = multiset_split(trace1.operators, trace2_operators);
         lemma_multiset_split(trace1.operators, trace2_operators);
 
         let op = trace2_operators[split];
 
-        // A consistent trace from trace2_configs[split] to trace1.configs.last()
+        // A consistent trace from trace2_configs[split] (before taking op) to trace1.configs.last()
         let convergent_trace = bounded_confluence_trace(trace1, trace2_configs.take(split + 1), trace2_operators.take(split));
         theorem_bounded_confluence(trace1, trace2_configs.take(split + 1), trace2_operators.take(split));
 
@@ -1389,9 +1212,20 @@ proof fn theorem_strong_normalization(trace1: AugmentedTrace, trace2_configs: Se
         // Rest of the convergent trace after split steps
         let convergent_trace_rest = convergent_trace.skip(split);
 
-        assume(diff.count(op) == 0);
-        assume(convergent_trace_rest.operators.to_multiset() == diff);
-        assume(forall |i: int| 0 <= i < convergent_trace_rest.len() ==> convergent_trace_rest.operators[i] != op);
+        assert(convergent_trace.operators.to_multiset() == trace1.operators.to_multiset());
+        assert(trace2_operators.take(split).len() == split);
+        assert forall |i: int| 0 <= i < split implies convergent_trace.operators[i] == #[trigger] trace2_operators.take(split + 1)[i] by {
+            assert(trace2_operators.take(split + 1)[i] == trace2_operators.take(split)[i]);
+        }
+
+        lemma_multiset_contains_remove_prefix(convergent_trace.operators, trace2_operators.take(split + 1), split);
+
+        assert(trace2_operators.take(split + 1).skip(split) =~= seq![op]);
+        assert(convergent_trace.operators.skip(split) =~= convergent_trace_rest.operators);
+
+        // assert(!multiset_contains(convergent_trace_rest.operators, seq![op]));
+        lemma_multiset_not_contains_singleton(convergent_trace_rest.operators, op);
+        // assume(forall |i: int| 0 <= i < convergent_trace_rest.len() ==> convergent_trace_rest.operators[i] != op);
 
         assert(trace2_configs[split] == trace2_configs.take(split + 1)[split]);
         // assert(convergent_trace.configs[split].config == trace2_configs[split]);

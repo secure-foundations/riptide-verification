@@ -176,6 +176,12 @@ impl Configuration {
         }
     }
 
+    pub open spec fn terminal(self) -> bool
+        recommends self.valid()
+    {
+        forall |op: OperatorIndex| self.is_op(op) ==> !self.fireable(op)
+    }
+
     /**
      * Condition for an operator to be fireable in a configuration
      */

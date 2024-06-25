@@ -1,4 +1,5 @@
 use vstd::prelude::*;
+use vstd::multiset::Multiset;
 use crate::semantics::*;
 
 verus! {
@@ -218,7 +219,7 @@ impl AugmentedTrace {
             operators: self.operators.drop_first(),
         }
     }
-    
+
     pub open spec fn drop_last(self) -> AugmentedTrace
         recommends self.len() > 0
     {
@@ -346,7 +347,7 @@ pub open spec fn consistent_step(
     // If the operator is a read/write, we require suitable permissions
     (aug_config1.config.operators[op].is_Read() ==>
         Permission::union_of(input_perms).has_read(aug_config1.config.get_op_input_values(op)[0].as_address())) &&
-        
+
     (aug_config1.config.operators[op].is_Write() ==>
         Permission::union_of(input_perms).has_write(aug_config1.config.get_op_input_values(op)[0].as_address()))
 }
@@ -539,7 +540,7 @@ proof fn lemma_consistent_steps_commute_augmentation_helper(
 
             aug_config4.config.is_channel(channel1) &&
             aug_config4.config.is_channel(channel2) &&
-            
+
             0 <= i < aug_config4.aug[channel1].len() &&
             0 <= j < aug_config4.aug[channel2].len() &&
             (channel1 != channel2 || i != j) &&
@@ -660,16 +661,16 @@ proof fn lemma_consistent_steps_commute_augmentation(
         }),
 {
     let aug_config4 = consistent_steps_commute_augmentation(op1, op2, aug_config1, aug_config2, aug_config3);
-    
+
     aug_config1.config.lemma_step_valid(op2);
-    
+
     assert(aug_config4.valid()) by {
         let op1_inputs = aug_config1.config.get_op_input_channels(op1);
         let op1_outputs = aug_config1.config.get_op_output_channels(op1);
 
         let op2_inputs = aug_config1.config.get_op_input_channels(op2);
         let op2_outputs = aug_config1.config.get_op_output_channels(op2);
-        
+
         assert forall |channel: ChannelIndex|
             #[trigger] aug_config4.config.is_channel(channel)
         implies
@@ -713,7 +714,7 @@ proof fn lemma_consistent_steps_commute_augmentation(
     assert(consistent_step(op1, aug_config4, aug_config3)) by {
         let op1_inputs = aug_config4.config.get_op_input_channels(op1);
         let op1_outputs = aug_config4.config.get_op_output_channels(op1);
-        
+
         let op2_inputs = aug_config1.config.get_op_input_channels(op2);
         let op2_outputs = aug_config1.config.get_op_output_channels(op2);
 
@@ -863,12 +864,38 @@ spec fn consistent_trace_commutes(trace: AugmentedTrace) -> AugmentedTrace
 }
 
 /**
+ * Lemma: If some operator is fireable at the first configuration of a trace,
+ * and the trace does not fire the operator, then the operator is fireable at
+ * the end of the trace.
+ */
+proof fn lemma_fireability_propagation(trace: AugmentedTrace, op: OperatorIndex)
+    requires
+        trace.valid(),
+        trace.len() > 0,
+        trace.configs.first().config.fireable(op),
+        (forall |i: int| 0 <= i < trace.len() ==> #[trigger] trace.operators[i] != op),
+
+    ensures
+        (forall |i: int| 0 <= i <= trace.len() ==> #[trigger] trace.configs[i].config.fireable(op)),
+
+    decreases trace.len()
+{
+    trace.configs.first().config.lemma_step_independence(trace.operators.first(), op);
+    assert(trace.configs[1].config.fireable(op));
+
+    if trace.len() > 1 {
+        lemma_fireability_propagation(trace.drop_first(), op);
+        assert(forall |i: int| 1 <= i <= trace.len() ==> trace.configs[i] == trace.drop_first().configs[i - 1]);
+    }
+}
+
+/**
  * A helper lemma for lemma_consistent_trace_commutes
- * 
+ *
  * Lemma: If the last operator in the trace is firable at the first config,
  * then it is also fireable in the third to last configuration.
  */
-proof fn lemma_fireability_propagation(trace: AugmentedTrace)
+proof fn lemma_fireability_propagation_last(trace: AugmentedTrace)
     requires
         trace.valid(),
         trace.len() > 1,
@@ -877,15 +904,9 @@ proof fn lemma_fireability_propagation(trace: AugmentedTrace)
 
     ensures
         trace.configs[trace.len() - 2].config.fireable(trace.operators.last()),
-
-    decreases trace.len()
 {
-    trace.configs.first().config.lemma_step_independence(trace.operators.first(), trace.operators.last());
-    assert(trace.configs[1].config.fireable(trace.operators.last()));
-
-    if trace.len() > 2 {
-        lemma_fireability_propagation(trace.drop_first());
-    }
+    lemma_fireability_propagation(trace.drop(1), trace.operators.last());
+    assert(trace.configs[trace.len() - 2] == trace.drop(1).configs[trace.len() - 2]);
 }
 
 /**
@@ -941,7 +962,7 @@ proof fn lemma_consistent_trace_commutes(trace: AugmentedTrace)
         assert(consistent_step(op_n, config_n, config_np1));
 
         let config_n_alt = consistent_steps_commute_augmentation(op_nm1, op_n, config_nm1, config_n, config_np1);
-        lemma_fireability_propagation(trace);
+        lemma_fireability_propagation_last(trace);
 
         lemma_consistent_steps_commute(op_nm1, op_n, config_nm1, config_n, config_np1);
         assert(consistent_step(op_n, config_nm1, config_n_alt));
@@ -974,7 +995,7 @@ spec fn multiset_contains(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>) -> boo
 proof fn lemma_multiset_contains_length(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>)
     requires
         multiset_contains(s1, s2),
-    
+
     ensures
         s1.len() >= s2.len(),
 {
@@ -984,59 +1005,62 @@ proof fn lemma_multiset_contains_length(s1: Seq<OperatorIndex>, s2: Seq<Operator
     let _ = s1.to_multiset().sub(s2.to_multiset()).len();
 }
 
+proof fn lemma_multiset_singleton_seq(op: OperatorIndex)
+    ensures
+        seq![op].to_multiset() =~= Multiset::singleton(op),
+{
+    assert(seq![op][0] == op);
+    seq![op].to_multiset_ensures();
+}
+
+proof fn lemma_multiset_add_commutes_with_concat(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>)
+    ensures
+        (s1 + s2).to_multiset() == s1.to_multiset().add(s2.to_multiset()),
+{
+    vstd::seq_lib::lemma_multiset_commutative(s1, s2);
+}
+
+proof fn lemma_multiset_remove_insert(s: Seq<OperatorIndex>, i: int)
+    requires
+        0 <= i < s.len(),
+
+    ensures
+        s.remove(i).to_multiset().insert(s[i]) == s.to_multiset(),
+{
+    s.to_multiset_ensures();
+
+    let _ = s.to_multiset().count(s[i]);
+
+    let s1 = s.subrange(0, i);
+    let s2 = seq![s[i]];
+    let s3 = s.skip(i + 1);
+
+    assert(s =~= s1 + s2 + s3);
+
+    vstd::seq_lib::lemma_multiset_commutative(s1 + s2, s3);
+    vstd::seq_lib::lemma_multiset_commutative(s1 + s3, s2);
+    vstd::seq_lib::lemma_multiset_commutative(s1, s2);
+    vstd::seq_lib::lemma_multiset_commutative(s1, s3);
+
+    assert(s.remove(i).to_multiset() == s1.to_multiset().add(s3.to_multiset()));
+
+    (s1 + s3).to_multiset_ensures();
+
+    assert(s.remove(i).to_multiset().insert(s[i]) == s.to_multiset());
+}
+
 proof fn lemma_multiset_contains_remove(s1: Seq<OperatorIndex>, s2: Seq<OperatorIndex>, i: int, j: int)
     requires
-        multiset_contains(s1, s2),
         0 <= i < s1.len(),
         0 <= j < s2.len(),
         s1[i] == s2[j],
-    
+
     ensures
-        multiset_contains(s1.remove(i), s2.remove(j)),
+        multiset_contains(s1, s2) <==> multiset_contains(s1.remove(i), s2.remove(j)),
 {
     reveal(multiset_contains);
-    s1.to_multiset_ensures();
-    s2.to_multiset_ensures();
-
-    let _ = s1.to_multiset().count(s1[i]);
-    let _ = s2.to_multiset().count(s2[j]);
-
-    let s1_1 = s1.subrange(0, i);
-    let s1_2 = seq![s1[i]];
-    let s1_3 = s1.skip(i + 1);
-
-    let s2_1 = s2.subrange(0, j);
-    let s2_2 = seq![s2[j]];
-    let s2_3 = s2.skip(j + 1);
-
-    assert(s1 =~= s1_1 + s1_2 + s1_3);
-    assert(s2 =~= s2_1 + s2_2 + s2_3);
-
-    vstd::seq_lib::lemma_multiset_commutative(s1_1 + s1_2, s1_3);
-    vstd::seq_lib::lemma_multiset_commutative(s1_1 + s1_3, s1_2);
-    vstd::seq_lib::lemma_multiset_commutative(s1_1, s1_2);
-    vstd::seq_lib::lemma_multiset_commutative(s1_1, s1_3);
-
-    vstd::seq_lib::lemma_multiset_commutative(s2_1 + s2_2, s2_3);
-    vstd::seq_lib::lemma_multiset_commutative(s2_1, s2_2);
-    vstd::seq_lib::lemma_multiset_commutative(s2_1, s2_3);
-
-    // assert(s1.to_multiset() == s1_1.to_multiset().add(s1_2.to_multiset()).add(s1_3.to_multiset()));
-    // assert(s1.to_multiset() == s1_1.to_multiset().add(s1_3.to_multiset()).add(s1_2.to_multiset()));
-
-    // assert(s1.remove(i) =~= s1_1 + s1_3);
-    assert(s1.remove(i).to_multiset() == s1_1.to_multiset().add(s1_3.to_multiset()));
-    assert(s2.remove(j).to_multiset() == s2_1.to_multiset().add(s2_3.to_multiset()));
-
-    // assert(s1_1.to_multiset().add(s1_3.to_multiset()).add(s1_2.to_multiset()) == (s1_1 + s1_3 + s1_2).to_multiset());
-    // assert(s1_1 + s1_3 + s1_2 =~= (s1_1 + s1_3).push(s1[i]));
-
-    (s1_1 + s1_3).to_multiset_ensures();
-    (s2_1 + s2_3).to_multiset_ensures();
-
-    assert(s1.remove(i).to_multiset().insert(s1[i]) == s1.to_multiset());
-    assert(s2.remove(j).to_multiset().insert(s2[j]) == s2.to_multiset());
-
+    lemma_multiset_remove_insert(s1, i);
+    lemma_multiset_remove_insert(s2, j);
     assert(s1.remove(i).to_multiset() == s1.to_multiset().remove(s1[i]));
     assert(s2.remove(j).to_multiset() == s2.to_multiset().remove(s2[j]));
 }
@@ -1045,7 +1069,7 @@ proof fn lemma_multiset_contains_transitive(s1: Seq<OperatorIndex>, s2: Seq<Oper
     requires
         multiset_contains(s1, s2),
         multiset_contains(s2, s3),
-    
+
     ensures
         multiset_contains(s1, s3),
 {
@@ -1056,7 +1080,7 @@ proof fn lemma_multiset_contains_transitive_elem(s1: Seq<OperatorIndex>, s2: Seq
     requires
         multiset_contains(s1, s2),
         s2.contains(op),
-    
+
     ensures
         s1.contains(op),
 {
@@ -1074,12 +1098,12 @@ spec fn bounded_confluence_trace(trace1: AugmentedTrace, trace2_configs: Seq<Con
     // recommends
     //     trace1.valid(),
     //     trace2_configs.len() == trace2_operators.len() + 1,
-        
+
     //     (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i].valid())) &&
     //     (forall |i: int| 0 <= i < trace2_operators.len() ==>
     //         (#[trigger] trace2_configs[i]).fireable(trace2_operators[i]) &&
     //         trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
-            
+
     //     trace2_configs.first() == trace1.configs.first().config,
 
     //     multiset_contains(trace1.operators, trace2_operators),
@@ -1113,14 +1137,14 @@ spec fn bounded_confluence_trace(trace1: AugmentedTrace, trace2_configs: Seq<Con
 proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<Configuration>, trace2_operators: Seq<OperatorIndex>)
     requires
         trace1.valid(),
-        
+
         // (trace2_configs, trace2_operators) is a valid trace (without augmentation)
         trace2_configs.len() == trace2_operators.len() + 1,
         (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i].valid())) &&
         (forall |i: int| 0 <= i < trace2_operators.len() ==>
             (#[trigger] trace2_configs[i]).fireable(trace2_operators[i]) &&
             trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
-    
+
         trace2_configs.first() == trace1.configs.first().config,
 
         multiset_contains(trace1.operators, trace2_operators),
@@ -1138,6 +1162,9 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
                 convergent_trace.configs[i].config == #[trigger] trace2_configs[i]) &&
             (forall |i: int| 0 <= i < trace2_operators.len() ==>
                 convergent_trace.operators[i] == #[trigger] trace2_operators[i]) &&
+
+            // Convergence trace use the exactly same operators as the consistent trace
+            trace1.operators.to_multiset() == convergent_trace.operators.to_multiset() &&
 
             // convergent_trace starts and ends the same as trace1 (with the same augmentation)
             convergent_trace.configs.first() == trace1.configs.first() &&
@@ -1159,7 +1186,7 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
 
         let first_occurrence_opt = trace1.operators.index_of_first(trace2_first_op);
         let first_occurrence = first_occurrence_opt.get_Some_0();
-        
+
         trace1.operators.index_of_first_ensures(trace2_first_op);
         assert(!first_occurrence_opt.is_None()) by {
             lemma_multiset_contains_transitive_elem(trace1.operators, trace2_operators, trace2_first_op);
@@ -1168,12 +1195,47 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
         let trace_prefix = trace1.take(first_occurrence + 1);
         let trace_suffix = trace1.skip(first_occurrence + 1);
 
-        // assert(trace_prefix.operators.last() == trace2_first_op);
+        // Operators fired in trace_prefix and trace_suffix together
+        // are the same as the operators fired in trace1
+        assert(trace_prefix.operators.to_multiset().add(trace_suffix.operators.to_multiset()) == trace1.operators.to_multiset()) by {
+            assert(trace_prefix.operators + trace_suffix.operators =~= trace1.operators);
+            lemma_multiset_add_commutes_with_concat(trace_prefix.operators, trace_suffix.operators);
+            assert(trace_prefix.operators.to_multiset().add(trace_suffix.operators.to_multiset()) =~= trace1.operators.to_multiset());
+        }
 
         let commuted_trace_prefix = consistent_trace_commutes(trace_prefix);
         lemma_consistent_trace_commutes(trace_prefix);
 
+        // Commuting operators do not change the fired operators
+        assert(commuted_trace_prefix.operators.to_multiset() == trace_prefix.operators.to_multiset()) by {
+            let moved_op = commuted_trace_prefix.operators.first();
+            let commuted_drop_first = commuted_trace_prefix.operators.drop_first();
+            // assert(commuted_trace_prefix.operators.drop_first() == trace_prefix.operators.drop_last());
+            // assert(commuted_trace_prefix.operators.first() == trace_prefix.operators.last());
+            assert(commuted_drop_first.push(moved_op) =~= trace_prefix.operators);
+
+            commuted_drop_first.to_multiset_ensures();
+            // commuted_trace_prefix.operators.to_multiset_ensures();
+            // assert(commuted_drop_first.push(moved_op).to_multiset() == commuted_drop_first.to_multiset().insert(moved_op));
+
+            assert(seq![moved_op] + commuted_drop_first =~= commuted_trace_prefix.operators);
+            lemma_multiset_add_commutes_with_concat(seq![moved_op], commuted_drop_first);
+            // assert(seq![moved_op].to_multiset().add(commuted_drop_first.to_multiset()) =~= commuted_trace_prefix.operators.to_multiset());
+
+            assume(seq![moved_op].to_multiset() == Multiset::singleton(moved_op));
+            assert(seq![moved_op].to_multiset().add(commuted_drop_first.to_multiset()) =~= commuted_drop_first.to_multiset().add(seq![moved_op].to_multiset()));
+            // assert(commuted_drop_first.to_multiset().add(seq![moved_op].to_multiset()) =~= commuted_drop_first.to_multiset().insert(moved_op));
+        }
+
         let commuted_trace_rest = commuted_trace_prefix.drop_first().add(trace_suffix);
+
+        assert(commuted_trace_rest.operators.to_multiset() == trace_prefix.operators.to_multiset().remove(trace2_first_op).add(trace_suffix.operators.to_multiset())) by {
+            assume(false);
+        }
+
+        assert(commuted_trace_rest.operators.to_multiset() == trace1.operators.to_multiset().remove(trace2_first_op)) by {
+            assume(false);
+        }
 
         let convergent_trace_rest = bounded_confluence_trace(commuted_trace_rest, trace2_configs.drop_first(), trace2_operators.drop_first());
 
@@ -1187,11 +1249,161 @@ proof fn theorem_bounded_confluence(trace1: AugmentedTrace, trace2_configs: Seq<
 
         theorem_bounded_confluence(commuted_trace_rest, trace2_configs.drop_first(), trace2_operators.drop_first());
 
+        assert(commuted_trace_rest.operators.to_multiset() == convergent_trace_rest.operators.to_multiset());
+
+        // assert(trace1.operators.to_multiset() =~= commuted_trace_rest.operators.to_multiset().insert(trace2_first_op));
+
         assert(seq![trace2_configs[0]] + trace2_configs.drop_first() =~= trace2_configs);
         assert(seq![trace2_operators[0]] + trace2_operators.drop_first() =~= trace2_operators);
+
+        let final_convergent_trace = bounded_confluence_trace(trace1, trace2_configs, trace2_operators);
+
+        assert(final_convergent_trace.operators =~= seq![trace2_first_op] + convergent_trace_rest.operators) by {
+            reveal(bounded_confluence_trace);
+        }
+
+        assert(trace1.operators.to_multiset() == final_convergent_trace.operators.to_multiset()) by {
+            lemma_multiset_add_commutes_with_concat(seq![trace2_first_op], convergent_trace_rest.operators);
+            assert(final_convergent_trace.operators.to_multiset() == seq![trace2_first_op].to_multiset().add(convergent_trace_rest.operators.to_multiset()));
+
+            assume(trace1.operators.to_multiset() == trace1.operators.to_multiset().remove(trace2_first_op).insert(trace2_first_op));
+            assume(trace1.operators.to_multiset() == commuted_trace_rest.operators.to_multiset().insert(trace2_first_op));
+            assume(trace1.operators.to_multiset() == convergent_trace_rest.operators.to_multiset().insert(trace2_first_op));
+
+            assume(convergent_trace_rest.operators.to_multiset().insert(trace2_first_op) == seq![trace2_first_op].to_multiset().add(convergent_trace_rest.operators.to_multiset()));
+        }
     }
-    
+
     reveal(bounded_confluence_trace);
+}
+
+spec fn multiset_split(a: Seq<OperatorIndex>, b: Seq<OperatorIndex>) -> int
+    decreases b.len()
+{
+    if b.len() == 0 || !a.to_multiset().contains(b[0]) {
+        0
+    } else {
+        let i = a.index_of(b[0]);
+        multiset_split(a.remove(i), b.remove(0)) + 1
+    }
+}
+
+proof fn lemma_multiset_split(a: Seq<OperatorIndex>, b: Seq<OperatorIndex>)
+    requires !multiset_contains(a, b)
+    ensures ({
+        let split = multiset_split(a, b);
+        0 <= split < b.len() &&
+        split <= a.len() &&
+        multiset_contains(a, b.take(split)) &&
+        !multiset_contains(a, b.take(split + 1))
+    })
+    decreases b.len()
+{
+    reveal(multiset_contains);
+
+    if b.len() > 0 && a.to_multiset().contains(b[0]) {
+        a.to_multiset_ensures();
+        assert(a.contains(b[0]));
+
+        let i = a.index_of(b[0]);
+        lemma_multiset_contains_remove(a, b, i, 0);
+
+        let split = multiset_split(a.remove(i), b.remove(0)) + 1;
+        lemma_multiset_split(a.remove(i), b.remove(0));
+
+        assert(b.remove(0).take(split - 1) =~= b.take(split).remove(0));
+        assert(b.remove(0).take(split) =~= b.take(split + 1).remove(0));
+
+        // assert(multiset_contains(a.remove(i), b.take(split).remove(0)));
+        // assert(!multiset_contains(a.remove(i), b.take(split + 1).remove(0)));
+
+        lemma_multiset_contains_remove(a, b.take(split), i, 0);
+        lemma_multiset_contains_remove(a, b.take(split + 1), i, 0);
+    } else {
+        a.to_multiset_ensures();
+        b.to_multiset_ensures();
+        b.take(0).to_multiset_ensures();
+        lemma_multiset_singleton_seq(b[0]);
+        assert(seq![b[0]] =~= b.take(1));
+
+        if b.len() == 0 {
+            assert(multiset_contains(a, b));
+            assert(false);
+        }
+
+        // assert(!a.to_multiset().contains(b[0]));
+        // assert(!Multiset::singleton(b[0]).subset_of(a.to_multiset()));
+        // assert(seq![b[0]].to_multiset() == Multiset::singleton(b[0]));
+    }
+}
+
+/**
+ * Theorem: If trace1 and trace2 have the same initial configuration,
+ * and trace1's last configuration is final.
+ * Then trace2's operators must be contained in trace1's operators counting multiplicity
+ *
+ * i.e., weak normalization witnessed by a consistent trace implies strong normalization.
+ */
+proof fn theorem_strong_normalization(trace1: AugmentedTrace, trace2_configs: Seq<Configuration>, trace2_operators: Seq<OperatorIndex>)
+    requires
+        trace1.valid(),
+
+        // (trace2_configs, trace2_operators) is a valid trace (without augmentation)
+        trace2_configs.len() == trace2_operators.len() + 1,
+        (forall |i: int| 0 <= i < trace2_configs.len() ==> (#[trigger] trace2_configs[i].valid())) &&
+        (forall |i: int| 0 <= i < trace2_operators.len() ==>
+            (#[trigger] trace2_configs[i]).fireable(trace2_operators[i]) &&
+            trace2_configs[i + 1] == trace2_configs[i].step(trace2_operators[i])),
+
+        trace2_configs.first() == trace1.configs.first().config,
+
+        // trace1 is complete
+        trace1.configs.last().config.terminal(),
+
+    ensures
+        multiset_contains(trace1.operators, trace2_operators),
+{
+    if !multiset_contains(trace1.operators, trace2_operators) {
+        reveal(multiset_contains);
+
+        // Exists i: int. trace2_operators[:i] <= trace1.operators /\ trace2_operators[:i+1] </= trace1.operators
+        let split = multiset_split(trace1.operators, trace2_operators);
+        lemma_multiset_split(trace1.operators, trace2_operators);
+
+        let op = trace2_operators[split];
+
+        // A consistent trace from trace2_configs[split] to trace1.configs.last()
+        let convergent_trace = bounded_confluence_trace(trace1, trace2_configs.take(split + 1), trace2_operators.take(split));
+        theorem_bounded_confluence(trace1, trace2_configs.take(split + 1), trace2_operators.take(split));
+
+        assert(multiset_contains(convergent_trace.operators, trace2_operators.take(split)));
+        assert(!multiset_contains(convergent_trace.operators, trace2_operators.take(split + 1)));
+
+        let diff = convergent_trace.operators.to_multiset().sub(trace2_operators.take(split).to_multiset());
+        assume(diff.count(op) == 0);
+
+        // Rest of the convergent trace after split steps
+        let convergent_trace_rest = convergent_trace.skip(split);
+
+        assume(convergent_trace_rest.operators.to_multiset() == diff);
+        assume(forall |i: int| 0 <= i < convergent_trace_rest.len() ==> convergent_trace_rest.operators[i] != op);
+
+        assert(trace2_configs[split] == trace2_configs.take(split + 1)[split]);
+        // assert(convergent_trace.configs[split].config == trace2_configs[split]);
+        // assert(convergent_trace.len() == trace1.len());
+        // assert(split <= convergent_trace.len());
+        // assert(convergent_trace_rest.configs.first() == convergent_trace.configs[split]);
+        assert(convergent_trace_rest.configs.first().config == trace2_configs[split]);
+
+        lemma_fireability_propagation(convergent_trace_rest, op);
+
+        assert(convergent_trace_rest.configs[convergent_trace_rest.len() as int] == convergent_trace_rest.configs.last());
+        assert(convergent_trace_rest.configs.last() == convergent_trace.configs.last());
+        assert(convergent_trace_rest.configs.last() == trace1.configs.last());
+
+        assert(trace1.configs.last().config.fireable(op));
+        assert(false);
+    }
 }
 
 } // verus!

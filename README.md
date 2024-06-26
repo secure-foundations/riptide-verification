@@ -8,12 +8,12 @@ Besides the implementation itself, the artifact also includes: 1) a formalizatio
 
 # Hardware Dependencies
 
-We have packed everything into two docker containers (one for x86_64 and one for ARM64). Please make sure that there is at least 10 GB of free disk space and 16 GB of memory.
+We have packed everything into two docker containers (one for x86_64 and one for ARM64). Please make sure that there is at least 20 GB of free disk space and 16 GB of memory.
 
-The artifact has been tested on the following set ups:
+The artifact has been tested on the following systems:
 
 - M1 Macbook Pro
-- …TODO
+- Ubuntu 21.04 on an x86_64 desktop
 
 # Getting Started Guide
 
@@ -56,7 +56,7 @@ We list how specifications and proofs in our Verus formalization (`/build/flowce
 
 ### Evaluation Results
 
-1. Run `cd /build/flowcert/evaluations && make -j <number of cores>` to run FlowCert on all examples in Figure 5. This will take a few minutes to finish depending on the number of cores you have. The bugs indicated in Figure 5 are already fixed in the RipTide compiler included in the artifact, so there should not be any errors.
+1. Run `cd /build/flowcert/evaluations && make -j <number of cores>` to run FlowCert on all examples in Figure 5. This might take a few minutes to finish depending on the number of cores you have. The bugs indicated in Figure 5 are already fixed in the RipTide compiler included in the artifact, so there should not be any errors.
 2. Run `python3 summarize.py` to print out a LaTeX table corresponding to Figure 5.
 
 # Reusability Guide
@@ -65,7 +65,7 @@ Our FlowCert tool should be reusable for compiling other C functions using the R
 
 For example, take this simple C function that computes the dot product of vectors `A` and `B` both of length `len`:
 
-```bash
+```c
 void f(int *A, int *B, int len, int *result)
 {
     int p = 0;
@@ -78,7 +78,7 @@ void f(int *A, int *B, int len, int *result)
 
 To compile and validate the compilation using FlowCert:
 
-1. Make sure you are in the `/build/flowcert` directory.
+1. `cd /build/flowcert`
 2. Save the function to a file `test.c` by
 
     ```bash
@@ -96,7 +96,7 @@ To compile and validate the compilation using FlowCert:
 
 3. Run
 
-    ```
+    ```bash
     python3 -m tools.sdc \
             --lib-dc $LIBDC_PATH \
             --llvm-bin $LLVM_12_BIN \
@@ -110,3 +110,15 @@ To compile and validate the compilation using FlowCert:
     (`LIBDC_PATH` and `LLVM_12_BIN` are environment variables available in the Docker image)
 
 4. If nothing goes wrong, the logs should contain both `bisim check succeeds` and `confluence check result: sat - confluent`.
+5. You can also visualize the output dataflow program by running
+
+    ```bash
+    python3 -m tools.visualizer test.f.o2p
+    ```
+
+    which would output a graph description in Graphviz format, and you can copy and paste that to any online Graphviz renderer to see the graph.
+
+You can try arbitrary C functions but there are some restrictions:
+- Only allowed types are integers and integer pointers.
+- No function calls.
+- Certain control-flow and memory dependency might crash the current RipTide compiler prototype.

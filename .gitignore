@@ -161,7 +161,7 @@ cython_debug/
 
 .DS_Store
 
-examples/old/
+examples/
 
 .vscode/
 

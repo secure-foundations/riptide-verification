@@ -10,6 +10,8 @@ ARG LIBDC_X86_64_PATH=sdc/libDC.x86_64.so
 ARG Z3_GIT=https://github.com/Z3Prover/z3.git
 ARG Z3_BRANCH=z3-4.12.2
 
+# NOTE: the Rust version must match the version used by Verus
+ARG RUST_VERSION=1.73.0
 ARG VERUS_GIT=https://github.com/zhengyao-lin/verus.git
 ARG VERUS_BRANCH=oopsla2024-ae
 
@@ -34,11 +36,7 @@ RUN mkdir -p build/llvm && \
     cmake -B build -DLLVM_ENABLE_ASSERTIONS=On -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLLVM_TARGETS_TO_BUILD= && \
     cmake --build build --target opt clang -j ${MAKE_JOBS}
 
-# Download and build Verus
-# Install Rust
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="$PATH:/root/.cargo/bin"
-
+# Build Z3
 ARG Z3_GIT
 ARG Z3_BRANCH
 RUN git clone --depth 1 --branch ${Z3_BRANCH} ${Z3_GIT} build/z3 && \
@@ -48,6 +46,12 @@ RUN git clone --depth 1 --branch ${Z3_BRANCH} ${Z3_GIT} build/z3 && \
     make
 # NOTE: `make -j n` in docker build leaks a lot of memory
 
+# Install Rust
+ARG RUST_VERSION
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain=${RUST_VERSION}
+ENV PATH="$PATH:/root/.cargo/bin"
+
+# Build Verus
 ARG VERUS_GIT
 ARG VERUS_BRANCH
 RUN git clone --depth 1 --branch ${VERUS_BRANCH} ${VERUS_GIT} build/verus && \
@@ -62,15 +66,8 @@ RUN apt-get update && \
     apt-get clean
 
 # Copy FlowCert and install dependencies
-WORKDIR /build/flowcert
-COPY requirements.txt requirements.txt
-RUN python3 -m pip install -r requirements.txt
-
-COPY confluence confluence
-COPY evaluations evaluations
-COPY semantics semantics
-COPY tools tools
-COPY utils utils
+COPY requirements.txt /build/flowcert/requirements.txt
+RUN python3 -m pip install -r /build/flowcert/requirements.txt
 
 # Copy the precompiled RipTide compiler depending on architecture
 ARG LIBDC_AARCH64_PATH
@@ -95,8 +92,7 @@ COPY --from=build /build/llvm/llvm-12.0.0.src/build/bin /build/llvm/bin
 # Copy Rust binaries
 COPY --from=build /root/.rustup /root/.rustup
 COPY --from=build /root/.cargo /root/.cargo
-RUN rm -r /root/.rustup/toolchains/stable-* && \
-    rm -r /root/.rustup/toolchains/*/bin && \
+RUN rm -r /root/.rustup/toolchains/*/bin && \
     rm -r /root/.rustup/toolchains/*/etc && \
     rm -r /root/.rustup/toolchains/*/libexec && \
     rm -r /root/.rustup/toolchains/*/share && \
@@ -106,11 +102,23 @@ RUN rm -r /root/.rustup/toolchains/stable-* && \
 # Copy Verus binaries
 COPY --from=build /build/verus/source/target-verus/release /build/verus/bin
 
+# Copy FlowCert files
+COPY confluence /build/flowcert/confluence
+COPY evaluations /build/flowcert/evaluations
+COPY semantics /build/flowcert/semantics
+COPY tools /build/flowcert/tools
+COPY utils /build/flowcert/utils
+COPY README.md /build/flowcert/README.md
+
+ADD image/paper.pdf /build/flowcert/paper.pdf
+ADD image/init.sh /root/init.sh
+RUN echo ". ~/init.sh" >> /root/.bashrc
+
 # Collapse all layers
 FROM scratch
 COPY --from=final / /
 WORKDIR /build/flowcert
-ENV LLVM_12_BIN=/build/llvm/bin
-ENV LIBDC_PATH=/build/dc/libDC.so
-ENV PATH="$PATH:/root/.cargo/bin:/build/llvm/bin:/build/verus/bin"
+ENV LLVM_12_BIN=/build/llvm/bin \
+    LIBDC_PATH=/build/dc/libDC.so \
+    PATH="$PATH:/root/.cargo/bin:/build/llvm/bin:/build/verus/bin"
 CMD ["/bin/bash"]

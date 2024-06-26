@@ -13,6 +13,7 @@ class Constant: ...
 @dataclass
 class FunctionArgument(Constant):
     variable_name: str
+    typ: str
 
 
 @dataclass
@@ -63,7 +64,7 @@ class DataflowGraph:
         vertices: List[ProcessingElement] = []
         channels: List[Channel] = []
 
-        function_argument_names: Set[str] = set()
+        function_argument_names: Dict[str, FunctionArgument] = {}
         function_arguments: List[FunctionArgument] = []
 
         for arg_obj in obj["function"]["args"]:
@@ -72,8 +73,9 @@ class DataflowGraph:
             if name.startswith("%"):
                 name = name[1:]
 
-            function_argument_names.add(name)
-            function_arguments.append(FunctionArgument(name))
+            arg = FunctionArgument(name, arg_obj["type"])
+            function_argument_names[name] = arg
+            function_arguments.append(arg)
 
         for i, vertex in enumerate(obj["vertices"]):
             assert i == vertex["ID"]
@@ -104,8 +106,7 @@ class DataflowGraph:
                     if name.startswith("%"):
                         name = name[1:]
 
-                    assert name in function_argument_names
-                    function_arg = FunctionArgument(name)
+                    function_arg = function_argument_names[name]
                     channel = Channel(channel_id, None, None, i, port, function_arg, input["hold"], default_channel_bound)
 
                 elif input["type"] == "const":

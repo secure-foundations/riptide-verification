@@ -13,7 +13,7 @@ We have packed everything into two docker containers (one for x86_64 and one for
 The artifact has been tested on the following systems:
 
 - M1 Macbook Pro
-- Ubuntu 21.04 on an x86_64 desktop
+- Ubuntu 22.10 on an x86_64 desktop
 
 # Getting Started Guide
 
@@ -21,17 +21,17 @@ Please follow the steps below to load and start our docker image.
 
 1. Download the suitable Docker image for your machine.
 2. Follow this guide to install Docker in your system: [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/). We have tested on Docker version 20.10.24.
-3. Load the image by `docker image load <docker image>`, which should add a new image tagged `flowcert` to your Docker environment.
+3. Load the image by `docker load --input flowcert-<arm64/x86_64>.tar.gz`, which should add a new image tagged `flowcert` to your Docker environment.
 4. Run the image by `docker run -it flowcert`.
 
 # Step-by-Step Instructions
 
 There are two claims in the paper to be verified in this artifact:
 
-1. Section 5.1 is formalized in Verus.
-2. Evaluation results and the bugs found.
+1. Section 5.1: formalization in Verus.
+2. Section 6: evaluation results.
 
-### Formalization of Section 5.1
+### [Section 5.1] Formalization
 
 You can run `cd /build/flowcert/confluence && verus main.rs --rlimit 50` to verify the proofs of results in Section 5.1. This will take roughtly 20 seconds to finish.
 
@@ -54,7 +54,7 @@ We list how specifications and proofs in our Verus formalization (`/build/flowce
     - `proof fn lemma_consistent_trace_commutes` proves Lemma 2.
     - `proof fn theorem_bounded_confluence` proves Theorem 1.
 
-### Evaluation Results
+### [Section 6] Evaluation Results
 
 1. Run `cd /build/flowcert/evaluations && make -j <number of cores>` to run FlowCert on all examples in Figure 5. This might take a few minutes to finish depending on the number of cores you have. The bugs indicated in Figure 5 are already fixed in the RipTide compiler included in the artifact, so there should not be any errors.
 2. Run `python3 summarize.py` to print out a LaTeX table corresponding to Figure 5.
@@ -100,11 +100,11 @@ To compile and validate the compilation using FlowCert:
     python3 -m tools.sdc \
             --lib-dc $LIBDC_PATH \
             --llvm-bin $LLVM_12_BIN \
-    			  --bisim \
-    			  --bisim-permission-unsat-core \
-    			  --bisim-cut-point-expansion \
-    			  --bisim-permission-fractional-reads 4 \
-    			  test.c
+            --bisim \
+            --bisim-permission-unsat-core \
+            --bisim-cut-point-expansion \
+            --bisim-permission-fractional-reads 4 \
+            test.c
     ```
 
     (`LIBDC_PATH` and `LLVM_12_BIN` are environment variables available in the Docker image)
@@ -117,8 +117,3 @@ To compile and validate the compilation using FlowCert:
     ```
 
     which would output a graph description in Graphviz format, and you can copy and paste that to any online Graphviz renderer to see the graph.
-
-You can try arbitrary C functions but there are some restrictions:
-- Only allowed types are integers and integer pointers.
-- No function calls.
-- Certain control-flow and memory dependency might crash the current RipTide compiler prototype.

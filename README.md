@@ -8,20 +8,20 @@ Besides the implementation itself, the artifact also includes: 1) a formalizatio
 
 # Hardware Dependencies
 
-We have packed everything into two docker containers (one for x86_64 and one for ARM64). Please make sure that there is at least 20 GB of free disk space and 16 GB of memory.
+We have packed everything into two docker containers (one for x86-64 and one for ARM64). Please make sure that there is at least 20 GB of free disk space and 16 GB of memory.
 
 The artifact has been tested on the following systems:
 
 - M1 Macbook Pro
-- Ubuntu 22.10 on an x86_64 desktop
+- Ubuntu 22.10 on an x86-64 desktop
 
 # Getting Started Guide
 
 Please follow the steps below to load and start our docker image.
 
-1. Download the suitable Docker image for your machine.
+1. Download `flowcert-arm64.tar.gz` if you are using an ARM64 machine; download `flowcert-x86-64.tar.gz` if you are using an x86-64 machine.
 2. Follow this guide to install Docker in your system: [https://docs.docker.com/engine/install/](https://docs.docker.com/engine/install/). We have tested on Docker version 20.10.24.
-3. Load the image by `docker load --input flowcert-<arm64/x86_64>.tar.gz`, which should add a new image tagged `flowcert` to your Docker environment.
+3. Load the image by `docker load --input flowcert-<arm64/x86-64>.tar.gz`, which should add a new image tagged `flowcert` to your Docker environment.
 4. Run the image by `docker run -it flowcert`.
 
 # Step-by-Step Instructions

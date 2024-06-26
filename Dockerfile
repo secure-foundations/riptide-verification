@@ -7,13 +7,16 @@ ARG CLANG_TARBALL_URL=https://github.com/llvm/llvm-project/releases/download/llv
 ARG LIBDC_AARCH64_PATH=sdc/libDC.aarch64.so
 ARG LIBDC_X86_64_PATH=sdc/libDC.x86_64.so
 
-ARG VERUS_GIT=git@github.com:verus-lang/verus.git
-ARG VERUS_COMMIT=5639d8008a61eb7545df4a6e7d2bc38be3d09fb0
+ARG Z3_GIT=https://github.com/Z3Prover/z3.git
+ARG Z3_BRANCH=z3-4.12.2
+
+ARG VERUS_GIT=https://github.com/zhengyao-lin/verus.git
+ARG VERUS_BRANCH=oopsla2024-ae
 
 FROM ubuntu:22.04 AS build
 
 RUN apt-get update && \
-    apt-get install -y build-essential cmake python3 python3-pip git wget
+    apt-get install -y build-essential cmake python3 python3-pip git wget zip curl
 
 # Download and build LLVM
 ARG MAKE_JOBS
@@ -33,16 +36,24 @@ RUN mkdir -p build/llvm && \
 
 # Download and build Verus
 # Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="$PATH:/root/.cargo/bin"
+
+ARG Z3_GIT
+ARG Z3_BRANCH
+RUN git clone --depth 1 --branch ${Z3_BRANCH} ${Z3_GIT} build/z3 && \
+    cd build/z3 && \
+    python3 scripts/mk_make.py && \
+    cd build && \
+    make
+# NOTE: `make -j n` in docker build leaks a lot of memory
 
 ARG VERUS_GIT
-ARG VERUS_COMMIT
-RUN git clone ${VERUS_GIT} build/verus && \
-    cd build/verus && \
-    git checkout ${VERUS_COMMIT} && \
-    ./tools/get-z3.sh && \
-    source ../tools/activate && \
-    vargo build --release
+ARG VERUS_BRANCH
+RUN git clone --depth 1 --branch ${VERUS_BRANCH} ${VERUS_GIT} build/verus && \
+    cd build/verus/source && \
+    cp /build/z3/build/z3 . && \
+    bash -c ". ../tools/activate && vargo build --release"
 
 FROM ubuntu:22.04 AS final
 
@@ -86,3 +97,5 @@ COPY utils utils
 
 ENV LLVM_12_BIN=/build/llvm/bin
 ENV LIBDC_PATH=/build/dc/libDC.so
+ENV PATH="$PATH:/build/llvm/bin"
+ENV PATH="$PATH:/build/verus/bin"

@@ -57,45 +57,60 @@ RUN git clone --depth 1 --branch ${VERUS_BRANCH} ${VERUS_GIT} build/verus && \
 
 FROM ubuntu:22.04 AS final
 
-COPY --from=build /build/llvm/llvm-12.0.0.src/build/bin /build/llvm/bin
-
-COPY --from=build /build/verus/source/target-verus/release/verus /build/verus/bin
-COPY --from=build /build/verus/source/target-verus/release/verus-root /build/verus/bin
-COPY --from=build /build/verus/source/target-verus/release/z3 /build/verus/bin
-COPY --from=build /build/verus/source/target-verus/release/rust_verify /build/verus/bin
-
 RUN apt-get update && \
     apt-get install -y python3 python3-pip && \
     apt-get clean
 
-# Copy the recompiled binary depending on architecture
-ARG LIBDC_AARCH64_PATH
-ARG LIBDC_X86_64_PATH
-COPY ${LIBDC_AARCH64_PATH} build/dc/libDC.aarch64.so
-COPY ${LIBDC_X86_64_PATH} build/dc/libDC.x86_64.so
-
-RUN arch=`uname -m` && \
-    if [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then \
-        mv build/dc/libDC.x86_64.so build/dc/libDC.so && \
-        rm build/dc/libDC.aarch64.so; \
-    elif [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then \
-        mv build/dc/libDC.aarch64.so build/dc/libDC.so && \
-        rm build/dc/libDC.x86_64.so; \
-    else \
-        echo "unsupported architecture $arch"; \
-        exit 1; \
-    fi
-
+# Copy FlowCert and install dependencies
 WORKDIR /build/flowcert
 COPY requirements.txt requirements.txt
 RUN python3 -m pip install -r requirements.txt
 
+COPY confluence confluence
 COPY evaluations evaluations
 COPY semantics semantics
 COPY tools tools
 COPY utils utils
 
+# Copy the precompiled RipTide compiler depending on architecture
+ARG LIBDC_AARCH64_PATH
+ARG LIBDC_X86_64_PATH
+COPY ${LIBDC_AARCH64_PATH} /build/dc/libDC.aarch64.so
+COPY ${LIBDC_X86_64_PATH} /build/dc/libDC.x86_64.so
+RUN arch=`uname -m` && \
+    if [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then \
+        mv /build/dc/libDC.x86_64.so /build/dc/libDC.so && \
+        rm /build/dc/libDC.aarch64.so; \
+    elif [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then \
+        mv /build/dc/libDC.aarch64.so /build/dc/libDC.so && \
+        rm /build/dc/libDC.x86_64.so; \
+    else \
+        echo "unsupported architecture $arch"; \
+        exit 1; \
+    fi
+
+# Copy LLVM binaries
+COPY --from=build /build/llvm/llvm-12.0.0.src/build/bin /build/llvm/bin
+
+# Copy Rust binaries
+COPY --from=build /root/.rustup /root/.rustup
+COPY --from=build /root/.cargo /root/.cargo
+RUN rm -r /root/.rustup/toolchains/stable-* && \
+    rm -r /root/.rustup/toolchains/*/bin && \
+    rm -r /root/.rustup/toolchains/*/etc && \
+    rm -r /root/.rustup/toolchains/*/libexec && \
+    rm -r /root/.rustup/toolchains/*/share && \
+    rm -r /root/.rustup/toolchains/*/lib/rustlib/*-linux-gnu/bin && \
+    rm -r /root/.cargo/registry
+
+# Copy Verus binaries
+COPY --from=build /build/verus/source/target-verus/release /build/verus/bin
+
+# Collapse all layers
+FROM scratch
+COPY --from=final / /
+WORKDIR /build/flowcert
 ENV LLVM_12_BIN=/build/llvm/bin
 ENV LIBDC_PATH=/build/dc/libDC.so
-ENV PATH="$PATH:/build/llvm/bin"
-ENV PATH="$PATH:/build/verus/bin"
+ENV PATH="$PATH:/root/.cargo/bin:/build/llvm/bin:/build/verus/bin"
+CMD ["/bin/bash"]

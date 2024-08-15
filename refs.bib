@@ -1,0 +1,17 @@
+@inproceedings{riptide,
+    author = {Gobieski, Graham and Ghosh, Souradip and Heule, Marijn and Mowry, Todd and Nowatzki, Tony and Beckmann, Nathan and Lucia, Brandon},
+    title = {RipTide: A Programmable, Energy-Minimal Dataflow Compiler and Architecture},
+    year = {2023},
+    isbn = {9781665462723},
+    publisher = {IEEE Press},
+    address = {New York, NY, USA},
+    url = {https://doi.org/10.1109/MICRO56248.2022.00046},
+    doi = {10.1109/MICRO56248.2022.00046},
+    abstract = {Emerging sensing applications create an unprecedented need for energy efficiency in programmable processors. To achieve useful multi-year deployments on a small battery or energy harvester, these applications must avoid off-device communication and instead process most data locally. Recent work has proven coarse-grained reconfigurable arrays (CGRAs) as a promising architecture for this domain. Unfortunately, nearly all prior CGRAs support only computations with simple control flow and no memory aliasing (e.g., affine inner loops), causing an Amdahl efficiency bottleneck as non-trivial fractions of programs must run on an inefficient von Neumann core.RipTide is a co-designed compiler and CGRA architecture that achieves both high programmability and extreme energy efficiency, eliminating this bottleneck. RipTide provides a rich set of control-flow operators that support arbitrary control flow and memory access on the CGRA fabric. RipTide implements these primitives without tagged tokens to save energy; this requires careful ordering analysis in the compiler to guarantee correctness. RipTide further saves energy and area by offloading most control operations into its programmable on-chip network, where they can re-use existing network switches. RipTide's compiler is implemented in LLVM, and its hardware is synthesized in Intel 22FFL. RipTide compiles applications written in C while saving 25\% energy v. the state-of-the-art energy-minimal CGRA and 6.6\texttimes{} energy v. a von Neumann core.},
+    booktitle = {Proceedings of the 55th Annual IEEE/ACM International Symposium on Microarchitecture},
+    pages = {546–564},
+    numpages = {19},
+    keywords = {compiler, dataflow, CGRA, reconfigurable, general-purpose, programmable, ultra-low-power, energy-minimal},
+    location = {Chicago, Illinois, USA},
+    series = {MICRO '22}
+}

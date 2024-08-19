@@ -1,5 +1,7 @@
 # Paper 282 OOPSLA 2024 Artifact Evaluation
 
+Please find the compiled Docker image at [https://doi.org/10.5281/zenodo.12552490](https://doi.org/10.5281/zenodo.12552490).
+
 # Introduction
 
 This is the artifact for our paper *FlowCert: Translation Validation for Asynchronous Dataflow Programs via Dynamic Fractional Permissions*. The artifact is a translation validation tool for the RipTide compiler, which verifies that a given instance of compilation from an LLVM program to a dataflow program (on the RipTide CGRA architecture) is correct.
@@ -8,7 +10,7 @@ Besides the implementation itself, the artifact also includes: 1) a formalizatio
 
 # Hardware Dependencies
 
-We have packed everything into two docker containers (one for x86-64 and one for ARM64). Please make sure that there is at least 20 GB of free disk space and 16 GB of memory.
+We have packed everything into two docker containers (one for x86-64 and one for ARM64). Please make sure that there is at least 20 GB of free disk space and 8 GB of memory.
 
 The artifact has been tested on the following systems:
 
@@ -104,7 +106,7 @@ To compile and validate the compilation using FlowCert:
             --bisim-permission-unsat-core \
             --bisim-cut-point-expansion \
             --bisim-permission-fractional-reads 4 \
-            test.c
+            test.c 2>&1 | grep -E "bisim check|confluence check"
     ```
 
     (`LIBDC_PATH` and `LLVM_12_BIN` are environment variables available in the Docker image)

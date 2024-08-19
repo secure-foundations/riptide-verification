@@ -1,0 +1,33 @@
+\RequirePackage{bussproofs}
+\RequirePackage{xparse}
+
+\def\@nonitbrack#1#2{{\normalfont{#1[#2]}}}
+\NewDocumentCommand\ruleLabel{s O{} m}{%
+    \@nonitbrack{#2}{\textsc{#3}\IfBooleanT{#1}{-\ensuremath{\ast}}}%
+}
+
+\def\inferLabel#1{\mbox{\scriptsize\normalfont{\ruleLabel{#1}}}}
+\NewDocumentCommand\bussRL{O{}}{%
+    \IfValueT{#1}{%
+        \RightLabel{\scriptsize #1}
+    }
+}
+
+\NewDocumentCommand\bussAx{O{} m}{\AxiomC{}\bussRL[#1]\UnaryInfC{\ensuremath{#2}}}
+\def\bussAss#1{\AxiomC{\ensuremath{#1}}}
+\NewDocumentCommand\bussUn{O{} m}{\bussRL[#1]\UnaryInfC{\ensuremath{#2}}}
+\NewDocumentCommand\bussBin{O{} m}{\bussRL[#1]\BinaryInfC{\ensuremath{#2}}}
+\NewDocumentCommand\bussTern{O{} m}{\bussRL[#1]\TrinaryInfC{\ensuremath{#2}}}
+\NewDocumentCommand\bussQuatern{O{} m}{\bussRL[#1]\QuaternaryInfC{\ensuremath{#2}}}
+\def\bussDisplay{\DisplayProof}
+\NewDocumentEnvironment{bussproof}{o D(){b}}{%
+    \begin{array}[#2]{@{}l@{}}
+        \IfValueT{#1}{%
+            \inferLabel{#1}
+            \\
+        }%
+        \bottomAlignProof
+}{%
+        \bussDisplay%
+    \end{array}
+}

@@ -5,7 +5,9 @@
 \usepackage{graphicx}
 \usepackage{amsthm}
 \usepackage{amsmath}
+\usepackage{mathpartir}
 \usepackage{wrapfig}
+\usepackage[hidelinks]{hyperref}
 \usepackage{cleveref}
 \usepackage{subcaption}
 \usepackage{listings}
@@ -16,6 +18,7 @@
 \usepackage[noend]{algpseudocode}
 \usepackage{algorithmicx}
 \usepackage{prftree}
+\usepackage{mybuss}
 \usepackage{stmaryrd}
 
 \newtheorem{theorem}{Theorem}
@@ -53,8 +56,8 @@
 \input{macros.tex}
 
 \title{Dataflow Deadlock}
-\author{Zhengyao}
-\date{July 2024}
+\author{Zhengyao Lin, Bas van den Heuvel}
+\date{\today}
 
 \begin{document}
 
@@ -213,17 +216,96 @@ Processes $\fProc{P},\fProc{Q},\ldots$ are defined as follows.
     \end{array}
 \]
 Expressions are left unspecified, but may use variables.
+We use $\fProc{\top}$ and $\fProc{\bot}$ to denote the boolean values true and false, respectively.
 We write $\eval(\fProc{e})$ to denote the evaluation of $\fProc{e}$ to a value.
-Given $\fProc{w}$ a value, we write $\fProc{P \pSubst{v \subst w}}$ to denote the substitution of every occurrence of $\fProc{v}$ in $\fProc{P}$.
+Given $\fProc{w}$ a value, we write $\fProc{P \pSubst{v \subst w}}$ to denote the substitution of every occurrence of $\fProc{v}$ in $\fProc{P}$, and similarly for channels.
 Input $\fProc{\pIn a(v) ; P}$ binds the occurrences of $\fProc{v}$ in $\fProc{P}$.
 We write $\fv(\fProc{P})$ and $\fc(\fProc{P})$ to denote the sets of free variables and free channels in $\fProc{P}$, respectively.
 
 A (dataflow) system $\fSys{S}$ is a tuple $\fSys{(Defs,Bufs,Procs)}$ where
 \begin{itemize}
-    \item $\fSys{Defs}$ is a set of process definitions $\fProc{X(\tilde{a};\tilde{v}) = P}$,
-    \item $\fSys{Bufs}$ is a set of buffers, and % TODO: define buffers.
+    \item $\fSys{Defs}$ is a set of process definitions $\fProc{\pCall X(\tilde{a};\tilde{v}) = P}$,
+    \item $\fSys{Bufs}$ is a set of buffers $\fProc{a:\tilde{v}}$, and
     \item $\fSys{Procs}$ is a set of processes.
 \end{itemize}
+The semantics of systems is defined by the rules in \cref{fig:systemSemantics}.
+
+\begin{figure}[t]
+    \begin{mathpar}
+        \begin{bussproof}[sys-out]
+            \bussAss{
+                \eval(\fProc{e}) = \fProc{w}
+            }
+            \bussUn{
+                \begin{array}{@{}c@{}}
+                    \fSys{(Defs, Bufs \cup \{ \fProc{a_i:\tilde{v}_i} \mid \fProc{a_i} \in \fProc{\tilde{a}}\}, Procs \cup \{ \fProc{\pOut \tilde{a}[e] ; P} \})}
+                    \\
+                    \sRed
+                    \\
+                    \fSys{(Defs, Bufs \cup \{ \fProc{a_i:\tilde{v}_i,w} \mid \fProc{a_i} \in \fProc{\tilde{a}}\}, Procs \cup \{ \fProc{P} \})}
+                \end{array}
+            }
+        \end{bussproof}
+        \and
+        \begin{bussproof}[sys-in]
+            \bussAx{
+                \begin{array}{@{}c@{}}
+                    \fSys{(Defs, Bufs \cup \{ \fProc{a : w,\tilde{v}} \}, Procs \cup \{ \fProc{\pIn a(x) ; P} \})}
+                    \\
+                    \sRed
+                    \\
+                    \fSys{(Defs, Bufs \cup \{ \fProc{a : \tilde{v}} \}, Procs \cup \{ \fProc{P \pSubst{x \subst w}} \})}
+                \end{array}
+            }
+        \end{bussproof}
+        \and
+        \begin{bussproof}[sys-if-true]
+            \bussAss{
+                \eval(\fProc{e}) = \fProc{\top}
+            }
+            \bussUn{
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{\pIf e \pThen P \pElse Q} \})}
+                \sRed
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{P} \})}
+            }
+        \end{bussproof}
+        \and
+        \begin{bussproof}[sys-if-false]
+            \bussAss{
+                \eval(\fProc{e}) = \fProc{\bot}
+            }
+            \bussUn{
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{\pIf e \pThen P \pElse Q} \})}
+                \sRed
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{Q} \})}
+            }
+        \end{bussproof}
+        \and
+        \begin{bussproof}[sys-call]
+            \bussAss{
+                \fProc{\pCall X(\tilde{a};\tilde{v}) = P} \in \fSys{Defs}
+            }
+            \bussAss{
+                |\fProc{\tilde{a}}| = |\fProc{\tilde{b}}|
+            }
+            \bussAss{
+                |\fProc{\tilde{v}}| = |\fProc{\tilde{w}}|
+            }
+            \noLine
+            \bussTern{
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{P \pSubst{\tilde{a} \subst \tilde{b}, \tilde{v} \subst \tilde{w}}} \})}
+                \sRed
+                \fSys{S'}
+            }
+            \bussUn{
+                \fSys{(Defs, Bufs, Procs \cup \{ \fProc{\pCall X(\tilde{b};\tilde{w})} \})}
+                \sRed
+                \fSys{S'}
+            }
+        \end{bussproof}
+    \end{mathpar}
+    \caption{Semantics of systems.}\label{fig:systemSemantics}
+\end{figure}
 
 \subsection{Deadlock}
 \label{sec:calculus:deadlock}

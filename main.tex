@@ -11,7 +11,7 @@
 \usepackage{listings}
 \usepackage{xspace}
 \usepackage{pifont}      % Provides the ding symbol used for comments
-\usepackage{color}       % Used to highlight comments
+\usepackage{xcolor}       % Used to highlight comments
 \usepackage{algorithm}
 \usepackage[noend]{algpseudocode}
 \usepackage{algorithmicx}
@@ -49,6 +49,8 @@
 \newcommand{\trans}[1]{\xrightarrow{\ #1\ }}
 
 \newcommand{\partialtran}[3]{\overset{#1}{\rightsquigarrow}_{#2, #3}}
+
+\input{macros.tex}
 
 \title{Dataflow Deadlock}
 \author{Zhengyao}
@@ -182,6 +184,52 @@ The semantics of the operators in RipTide (\cite{riptide}, Fig.~3) can be modell
         \end{align*}
     \end{itemize}
 \end{itemize}
+
+\section{Calculus}
+\label{sec:calculus}
+
+\subsection{Dataflow Systems}
+\label{sec:calculus:systems}
+
+We use $\fProc{a},\fProc{b},\ldots$ to denote channels, $\fProc{v},\fProc{w},\ldots$ to denote variables, $\fProc{e},\fProc{f},\ldots$ to denote expressions, $\fProc{X},\fProc{Y},\ldots$ to denote process definitions.
+We write $\fProc{\tilde{a}}$ and $\fProc{\tilde{v}}$ to denote (comma-separated) sequences of zero or more channels and variables, respectively; we use $\fProc{\epsi}$ to denote the empty sequence.
+Processes $\fProc{P},\fProc{Q},\ldots$ are defined as follows.
+\[
+    \begin{array}{@{}r@{}c@{}lr@{}}
+        \fProc{P},\fProc{Q},\ldots & {}::={} &
+        \fProc{0} & \text{inaction}
+        \\
+        & \sepr &
+        \fProc{\pIn a(v) ; P} & \text{input}
+        \\
+        & \sepr &
+        \fProc{\pOut \tilde{a}[e] ; P} & \text{output}
+        \\
+        & \sepr &
+        \fProc{\pIf e \pThen P \pElse Q} & \text{conditional}
+        \\
+        & \sepr &
+        \fProc{\pCall X(\tilde{a};\tilde{v})} & \text{process call}
+    \end{array}
+\]
+Expressions are left unspecified, but may use variables.
+We write $\eval(\fProc{e})$ to denote the evaluation of $\fProc{e}$ to a value.
+Given $\fProc{w}$ a value, we write $\fProc{P \pSubst{v \subst w}}$ to denote the substitution of every occurrence of $\fProc{v}$ in $\fProc{P}$.
+Input $\fProc{\pIn a(v) ; P}$ binds the occurrences of $\fProc{v}$ in $\fProc{P}$.
+We write $\fv(\fProc{P})$ and $\fc(\fProc{P})$ to denote the sets of free variables and free channels in $\fProc{P}$, respectively.
+
+A (dataflow) system $\fSys{S}$ is a tuple $\fSys{(Defs,Bufs,Procs)}$ where
+\begin{itemize}
+    \item $\fSys{Defs}$ is a set of process definitions $\fProc{X(\tilde{a};\tilde{v}) = P}$,
+    \item $\fSys{Bufs}$ is a set of buffers, and % TODO: define buffers.
+    \item $\fSys{Procs}$ is a set of processes.
+\end{itemize}
+
+\subsection{Deadlock}
+\label{sec:calculus:deadlock}
+
+% TODO: define closed systems.
+% TODO: define deadlock.
 
 \section{Examples and Non-Examples of Deadlocks}
 

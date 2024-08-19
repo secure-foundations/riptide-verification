@@ -1,0 +1,25 @@
+\def\sepr{|}
+\DeclareMathOperator\eval{eval}
+\def\epsi{\varepsilon}
+\def\subst{\mathbin{\mapsto}}
+\DeclareMathOperator\fv{fv}
+\DeclareMathOperator\fc{fc}
+
+%% Processes
+
+\colorlet{cProc}{black}
+\def\fProc#1{{\mathit{\color{cProc}#1}}}
+
+\def\pIn#1(#2){#1(#2)}
+\def\pOut#1[#2]{#1[#2]}
+\def\pKw#1{\mathinner{#1}}
+\def\pIf{\pKw{if}}
+\def\pThen{\pKw{then}}
+\def\pElse{\pKw{else}}
+\def\pCall#1(#2){#1(#2)}
+\def\pSubst#1{{\big[#1\big]}}
+
+%% (Dataflow) Systems
+
+\colorlet{cSys}{violet} % TODO: replace by color-blindness-friendly color.
+\def\fSys#1{{\mathsf{\color{cSys}#1}}}

@@ -9,6 +9,7 @@ import shlex
 import shutil
 import tempfile
 import argparse
+import platform
 import subprocess
 
 import semantics.llvm as llvm
@@ -50,7 +51,19 @@ def find_llvm(lib_dc_path: Optional[str] = None, llvm_bin_path: Optional[str] = 
     """
 
     lib_dc_path = lib_dc_path or os.environ.get("LIB_DC_PATH")
-    assert lib_dc_path is not None, "failed to find libDC shared library (either from --lib-dc flag or LIB_DC_PATH environment)"
+
+    if lib_dc_path is None:
+        current_dir = os.path.dirname(os.path.realpath(__file__))
+
+        if platform.system() == "Linux" and platform.machine() == "x86_64":
+            lib_dc_path = os.path.join(current_dir, "..", "sdc", "libDC.x86_64.so")
+        elif platform.system() == "Linux" and platform.machine() == "aarch64":
+            lib_dc_path = os.path.join(current_dir, "..", "sdc", "libDC.aarch64.so")
+        elif platform.system() == "Darwin" and platform.machine() == "arm64":
+            lib_dc_path = os.path.join(current_dir, "..", "sdc", "libDC.aarch64.dylib")
+        else:
+            raise RuntimeError(f"pre-built sdc unavailable for platform {platform.system()} {platform.machine()}")
+
     assert os.path.isfile(lib_dc_path), f"libDC file {lib_dc_path} does not exist"
     lib_dc_path = os.path.realpath(lib_dc_path)
 
@@ -108,7 +121,7 @@ def check_dep(dependencies: Iterable[str], results: Iterable[str]) -> bool:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("source_file", help="Input source file (.c or .ll)")
-    parser.add_argument("--lib-dc", help="Path to the libDC shared library (usually named libDC.{{so,dylib}})")
+    parser.add_argument("--lib-dc", help="Path to the libDC shared library (usually named libDC.{so,dylib})")
     parser.add_argument("--llvm-bin", help="Path to the LLVM and Clang binaries")
 
     parser.add_argument("--normal", action="store_const", const=True, default=False, help="Disable some flags used for bisim, allow optimizations such as streamify")
@@ -252,7 +265,7 @@ def main():
                             "-fno-hold-channel",
                             "-fno-stream",
                             "-fno-dedup",
-                            "-additional-id-lcssa",
+                            # "-additional-id-lcssa",
                             "-fno-array-dep",
                         ]
 

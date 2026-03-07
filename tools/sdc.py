@@ -124,7 +124,8 @@ def main():
     parser.add_argument("--lib-dc", help="Path to the libDC shared library (usually named libDC.{so,dylib})")
     parser.add_argument("--llvm-bin", help="Path to the LLVM and Clang binaries")
 
-    parser.add_argument("--normal", action="store_const", const=True, default=False, help="Disable some flags used for bisim, allow optimizations such as streamify")
+    parser.add_argument("--no-stream", action="store_const", const=True, default=False, help="Disable streamification")
+    # parser.add_argument("--no-pipelining", action="store_const", const=True, default=False, help="Disable pipelining")
     parser.add_argument("--gen-norm-ll", action="store_const", const=True, default=False, help="Generate LLVM code after some normalizations (.norm.ll)")
     parser.add_argument("--gen-lso-ll", action="store_const", const=True, default=False, help="Generate LLVM code after lso ordering (.lso.ll)")
     parser.add_argument("--gen-log", action="store_const", const=True, default=False, help="Generate compilation log (.log)")
@@ -258,16 +259,17 @@ def main():
                         "-func", function_name,
                         "-json", o2p_path,
                         "-lso-ll-out", lso_ll_path,
+                        "-fno-hold-channel",
                         norm_ll_path,
                     ]
-                    if not args.normal:
-                        cmd += [
-                            "-fno-hold-channel",
-                            "-fno-stream",
-                            "-fno-dedup",
-                            # "-additional-id-lcssa",
-                            "-fno-array-dep",
-                        ]
+                    # "-fno-dedup",
+                    # "-additional-id-lcssa",
+                    # "-fno-array-dep",
+                    if args.no_stream:
+                        cmd += ["-fno-stream"]
+
+                    # if args.no_pipelining:
+                    #     cmd += ["-fno-array-dep"]
 
                     logger.info(f"running {shlex.join(cmd)}")
                     result = subprocess.run(
